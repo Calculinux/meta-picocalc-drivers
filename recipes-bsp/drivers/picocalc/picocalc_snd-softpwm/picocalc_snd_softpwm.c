@@ -29,6 +29,7 @@
 
 MODULE_LICENSE("GPL v2");
 MODULE_AUTHOR("hiro <hiro@hiro.com>");
+MODULE_DESCRIPTION("Software PWM sound driver for PicoCalc");
 
 #define MICRO_SEC 1000000
 #define NANO_SEC  (MICRO_SEC*1000)
@@ -45,7 +46,7 @@ MODULE_AUTHOR("hiro <hiro@hiro.com>");
 */
 
 static const struct of_device_id picocalc_snd_pwm_dt_ids[] = {
-	{ .compatible = "fsl,picocalc-snd-pwm", },
+	{ .compatible = "fsl,picocalc-snd-softpwm", },
 	{ /* sentinel */ }
 };
 MODULE_DEVICE_TABLE(of, picocalc_snd_pwm_dt_ids);

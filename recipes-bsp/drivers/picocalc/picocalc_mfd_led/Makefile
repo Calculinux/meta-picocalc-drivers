@@ -1,7 +1,7 @@
 # While on staging, keep debug enabled
 DEFINES += -DDEBUG
 
-obj-m += picocalc_mfd.o
+obj-m += picocalc_mfd_led.o
 
 # Kernel build targets
 KERNEL_SRC ?= /lib/modules/$(shell uname -r)/build

@@ -17,6 +17,7 @@ RDEPENDS:${PN} = " \
     picocalc-mfd-bms \
     picocalc-mfd-bkl \
     picocalc-mfd-kbd \
+    picocalc-mfd-led \
 "
 
 # This is a meta-package, no files to install

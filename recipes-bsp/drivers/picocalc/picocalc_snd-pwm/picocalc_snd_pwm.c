@@ -30,6 +30,7 @@
 
 MODULE_LICENSE("GPL v2");
 MODULE_AUTHOR("hiro <hiro@hiro.com>");
+MODULE_DESCRIPTION("Hardware PWM sound driver for PicoCalc");
 
 #define MICRO_SEC 1000000
 #define NANO_SEC  (MICRO_SEC*1000)

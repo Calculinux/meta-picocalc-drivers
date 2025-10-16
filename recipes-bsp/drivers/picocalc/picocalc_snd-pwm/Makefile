@@ -1,4 +1,16 @@
 # While on staging, keep debug enabled
 DEFINES += -DDEBUG
 
-obj-$(CONFIG_PICOCALC_SND_PWM) += picocalc_snd_pwm.o
+obj-m += picocalc_snd_pwm.o
+
+# Kernel build targets
+KERNEL_SRC ?= /lib/modules/$(shell uname -r)/build
+
+all:
+	$(MAKE) -C $(KERNEL_SRC) M=$(PWD) modules
+
+clean:
+	$(MAKE) -C $(KERNEL_SRC) M=$(PWD) clean
+
+install:
+	$(MAKE) -C $(KERNEL_SRC) M=$(PWD) modules_install
