@@ -1,3 +1,5 @@
+FILESEXTRAPATHS:prepend := "${THISDIR}:"
+
 SUMMARY = "PicoCalc MFD core driver"
 DESCRIPTION = "Multi-function device core driver for modular PicoCalc hardware support"
 LICENSE = "GPL-2.0-only"

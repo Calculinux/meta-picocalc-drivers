@@ -1,3 +1,5 @@
+FILESEXTRAPATHS:prepend := "${THISDIR}:"
+
 SUMMARY = "PicoCalc LCD driver"
 DESCRIPTION = "ILI9488 framebuffer driver for PicoCalc LCD display"
 LICENSE = "GPL-2.0-only"

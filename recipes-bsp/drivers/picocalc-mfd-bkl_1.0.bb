@@ -1,3 +1,5 @@
+FILESEXTRAPATHS:prepend := "${THISDIR}:"
+
 SUMMARY = "PicoCalc MFD backlight driver"
 DESCRIPTION = "LCD backlight driver for PicoCalc MFD architecture"
 LICENSE = "GPL-2.0-only"

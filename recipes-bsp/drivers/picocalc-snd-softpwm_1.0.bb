@@ -1,3 +1,5 @@
+FILESEXTRAPATHS:prepend := "${THISDIR}:"
+
 SUMMARY = "PicoCalc soft PWM sound driver"
 DESCRIPTION = "Software PWM-based sound driver for PicoCalc"
 LICENSE = "GPL-2.0-only"

@@ -1,3 +1,5 @@
+FILESEXTRAPATHS:prepend := "${THISDIR}:"
+
 SUMMARY = "PicoCalc MFD keyboard driver"
 DESCRIPTION = "Modular keyboard driver for PicoCalc MFD architecture"
 LICENSE = "GPL-2.0-only"

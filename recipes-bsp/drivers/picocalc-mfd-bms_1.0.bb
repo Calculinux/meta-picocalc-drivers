@@ -1,3 +1,5 @@
+FILESEXTRAPATHS:prepend := "${THISDIR}:"
+
 SUMMARY = "PicoCalc MFD battery management driver"
 DESCRIPTION = "Battery management system driver for PicoCalc MFD architecture"
 LICENSE = "GPL-2.0-only"
