@@ -8,16 +8,11 @@ PR = "r0"
 
 COMPATIBLE_MACHINE = "luckfox-lyra"
 
-# Legacy drivers
+# Include all MFD drivers and original drivers (except legacy keyboard)
 RDEPENDS:${PN} = " \
-    picocalc-kbd \
     picocalc-lcd \
     picocalc-snd-pwm \
     picocalc-snd-softpwm \
-"
-
-# Optional MFD drivers (can be installed separately)
-RRECOMMENDS:${PN} = " \
     picocalc-mfd \
     picocalc-mfd-bms \
     picocalc-mfd-bkl \
