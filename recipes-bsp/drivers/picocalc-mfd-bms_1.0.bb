@@ -18,8 +18,12 @@ EXTRA_OEMAKE:append = " KSRC=${STAGING_KERNEL_DIR}"
 
 COMPATIBLE_MACHINE = "luckfox-lyra"
 
-# Depends on MFD core driver
+# Build-time dependency on MFD headers and runtime dependency on MFD driver
+DEPENDS += "picocalc-mfd"
 RDEPENDS:${PN} = "picocalc-mfd"
+
+# Add include path for MFD headers
+EXTRA_OEMAKE:append = " CFLAGS_MODULE=\"-I${STAGING_INCDIR}\""
 
 do_install() {
     install -d ${D}${nonarch_base_libdir}/modules/${KERNEL_VERSION}/extra

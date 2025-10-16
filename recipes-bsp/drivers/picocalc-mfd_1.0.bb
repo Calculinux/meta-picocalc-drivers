@@ -21,4 +21,12 @@ COMPATIBLE_MACHINE = "luckfox-lyra"
 do_install() {
     install -d ${D}${nonarch_base_libdir}/modules/${KERNEL_VERSION}/extra
     install -m 0644 ${B}/picocalc_mfd.ko ${D}${nonarch_base_libdir}/modules/${KERNEL_VERSION}/extra/
+    
+    # Install shared header for other MFD drivers
+    install -d ${D}${includedir}/picocalc
+    install -m 0644 ${S}/picocalc_reg.h ${D}${includedir}/picocalc/
 }
+
+# Package the header file
+FILES:${PN}-dev = "${includedir}/picocalc/*"
+PACKAGES += "${PN}-dev"
