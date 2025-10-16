@@ -27,6 +27,5 @@ do_install() {
     install -m 0644 ${S}/picocalc_reg.h ${D}${includedir}/picocalc/
 }
 
-# Package the header file
-FILES:${PN}-dev = "${includedir}/picocalc/*"
-PACKAGES += "${PN}-dev"
+# Package the header file (module class already creates -dev package)
+FILES:${PN}-dev += "${includedir}/picocalc/*"
