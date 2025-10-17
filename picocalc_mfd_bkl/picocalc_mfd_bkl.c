@@ -10,7 +10,7 @@
 #include <linux/regmap.h>
 #include <linux/of.h>
 
-#include <picocalc/picocalc_reg.h>
+#include "../picocalc_mfd/picocalc_reg.h"
 
 struct picocalc_mfd_bkl {
     struct regmap *regmap;
