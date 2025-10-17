@@ -1,112 +1,41 @@
-# meta-picocalc-drivers
+   # PicoCalc driver sources
 
-OpenEmbedded/Yocto Project development layer for out-of-tree Linux kernel drivers for the PicoCalc device and related hardware.
+   This repository provides the out-of-tree Linux kernel driver sources and a top-level build Makefile for the PicoCalc device and related hardware.
 
-## About
+   For Yocto/OpenEmbedded consumption and BitBake recipes, see the `meta-picocalc-drivers` or `meta-calculinux` repositories which contain recipes that can fetch and package these sources for images.
 
-This layer provides BitBake recipes for building and installing kernel drivers that are not included in the mainline Linux kernel or are specific to the PicoCalc device. The layer is designed to be modular and extensible, allowing for easy addition of new driver recipes.
+   What this repo contains
+   - A top-level Makefile that can build all drivers against a kernel source (`KERNEL_SRC` / `KSRC`).
+   - Subdirectories for individual drivers (MFD core and sub-drivers, legacy keyboard, LCD, sound drivers, etc.).
 
-## Layer Dependencies
+   Quick standalone build
+   1. Ensure you have a matching kernel build directory (for example the kernel source or headers for the target kernel):
 
-This layer depends on:
-- meta-openembedded
-- poky (core)
-
-## Compatibility
-
-This layer is compatible with the Yocto Project **walnascar** release.
-
-## Setup
-
-1. Clone this repository to your Yocto build environment:
    ```bash
-   git clone <repository-url> /path/to/your/layers/meta-picocalc-drivers
+   # KERNEL_SRC should point to the kernel build directory (the directory with the top-level Makefile)
+   export KERNEL_SRC=/path/to/kernel/build
+   # Build everything
+   make KERNEL_SRC=${KERNEL_SRC} all
+
+   # Install modules into a staging directory (honors INSTALL_MOD_PATH)
+   make KERNEL_SRC=${KERNEL_SRC} INSTALL_MOD_PATH=/tmp/picocalc-mods modules_install
    ```
 
-2. Add the layer to your `conf/bblayers.conf`:
-   ```
-   BBLAYERS ?= " \\
-     /path/to/poky/meta \\
-     /path/to/poky/meta-poky \\
-     /path/to/poky/meta-yocto-bsp \\
-     /path/to/your/layers/meta-picocalc-drivers \\
-     "
-   ```
+   Notes:
+   - The Makefile delegates to the kernel build system (it runs `make -C ${KERNEL_SRC} M=$(PWD)/<driver> modules`).
+   - You can then copy the produced `.ko` files from the install tree to your target rootfs or package them for your distribution.
 
-3. Add any required driver packages to your image or `conf/local.conf`:
-   ```
-   IMAGE_INSTALL:append = " picocalc-drivers-all"
-   ```
-   
-   Or add individual drivers as needed:
-   ```
-   IMAGE_INSTALL:append = " picocalc-kbd picocalc-lcd"
-   ```
+   Device tree / runtime notes
+   - The drivers support both a legacy keyboard driver and a new MFD-based keyboard. These can be installed simultaneously; the device tree 'compatible' strings and driver probe order control which driver binds at runtime.
+   - The MFD core driver populates child platform devices for sub-drivers (keyboard, backlight, BMS, LED).
 
-## Available Drivers
+   Contributing
+   - Keep each driver in its own subdirectory with a small `Makefile`/Kbuild fragment if needed (see existing subdirs).
+   - Prefer the kernel build system's `modules`/`modules_install` rules rather than custom build logic.
+   - Update licensing and headers for any new files, and add tests or instructions where appropriate.
 
-This layer provides the following PicoCalc hardware drivers:
+   License
+   - Kernel parts are GPL-compatible; check each driver subdirectory for the specific licensing header.
 
-### Legacy Drivers
-- **picocalc-kbd** - Keyboard driver for PicoCalc hardware
-- **picocalc-lcd** - ILI9488 framebuffer driver for LCD display
-- **picocalc-snd-pwm** - Hardware PWM-based sound driver
-- **picocalc-snd-softpwm** - Software PWM-based sound driver
-
-### MFD (Multi-Function Device) Drivers
-The new modular architecture provides improved hardware abstraction:
-- **picocalc-mfd** - Core MFD driver (required for MFD child drivers)
-- **picocalc-mfd-bms** - Battery management system driver
-- **picocalc-mfd-bkl** - LCD backlight control driver
-- **picocalc-mfd-kbd** - Modular keyboard driver
-
-### Meta Packages
-- **picocalc-drivers-all** - Installs all legacy drivers and recommends MFD drivers
-
-## Usage
-
-### Installing All Drivers
-```
-IMAGE_INSTALL:append = " picocalc-drivers-all"
-```
-
-### Installing Specific Driver Sets
-Legacy drivers only:
-```
-IMAGE_INSTALL:append = " picocalc-kbd picocalc-lcd picocalc-snd-pwm"
-```
-
-MFD drivers only:
-```
-IMAGE_INSTALL:append = " picocalc-mfd picocalc-mfd-bms picocalc-mfd-bkl picocalc-mfd-kbd"
-```
-
-### Adding New Drivers
-
-To add a new driver to this layer:
-
-1. Create a new recipe file in `recipes-bsp/drivers/`
-2. Follow the BitBake recipe format for kernel modules
-3. Ensure proper licensing information is included
-4. Test the recipe builds successfully
-
-### Example Recipe Structure
-
-Driver recipes should inherit from the `module` class and include proper source handling, compilation, and installation routines. See the existing recipes in `recipes-bsp/drivers/` for examples.
-
-## Contributing
-
-When contributing new driver recipes:
-
-1. Ensure all source code licensing is compatible and properly documented
-2. Test builds on the target hardware when possible
-3. Follow Yocto Project coding standards and best practices
-4. Update this README if adding significant new functionality
-
-## License
-
-This layer is released under the MIT License. See the `LICENSE` file for details.
-
-## Support
-
-For issues and questions related to this layer, please refer to the Calculinux project documentation or file an issue in the project repository.
+   Contact
+   - Raise issues or PRs against the Calculinux organization repositories on GitHub.
