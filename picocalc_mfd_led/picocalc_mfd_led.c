@@ -9,11 +9,10 @@
 #include <linux/regmap.h>
 #include <linux/of.h>
 
-#include "../picocalc_mfd/picocalc_reg.h"
-
 struct picocalc_mfd_led {
     struct regmap *regmap;
     struct led_classdev led_dev;
+	unsigned int reg;
 };
 
 static void picocalc_led_brightness_set(struct led_classdev *led_cdev,
@@ -23,7 +22,7 @@ static void picocalc_led_brightness_set(struct led_classdev *led_cdev,
                                                 struct picocalc_mfd_led,
                                                 led_dev);
 
-    regmap_write(led->regmap, (REG_ID_BK2 | MSB_MASK), brightness);
+    regmap_write(led->regmap, (led->reg | (1<<7)), brightness);
 }
 
 static int picocalc_mfd_led_probe(struct platform_device *pdev)
@@ -34,6 +33,13 @@ static int picocalc_mfd_led_probe(struct platform_device *pdev)
     led = devm_kzalloc(dev, sizeof(*led), GFP_KERNEL);
     if (!led)
         return -ENOMEM;
+
+    u32 reg_addr;
+    if (of_property_read_u32(pdev->dev.of_node, "reg", &reg_addr)) {
+        dev_err(&pdev->dev, "Failed to get reg property\n");
+        return -EINVAL;
+    }
+    led->reg = reg_addr;
 
     led->regmap = dev_get_regmap(dev->parent, NULL);
     if (!led->regmap) {

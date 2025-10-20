@@ -9,12 +9,12 @@
 #include <linux/platform_device.h>
 #include <linux/regmap.h>
 #include <linux/of.h>
-
-#include "../picocalc_mfd/picocalc_reg.h"
+#include <linux/ioport.h>
 
 struct picocalc_mfd_bkl {
     struct regmap *regmap;
     struct backlight_device *bldev;
+    unsigned int reg;
 };
 
 static int picocalc_bkl_update_status(struct backlight_device *bldev)
@@ -22,7 +22,7 @@ static int picocalc_bkl_update_status(struct backlight_device *bldev)
     struct picocalc_mfd_bkl *bkl = bl_get_data(bldev);
     int brightness = bldev->props.brightness;
 
-    return regmap_write(bkl->regmap, (REG_ID_BKL | MSB_MASK) , brightness);
+    return regmap_write(bkl->regmap, (bkl->reg | (1<<7)) , brightness);
 }
 
 static int picocalc_bkl_get_brightness(struct backlight_device *bldev)
@@ -31,7 +31,7 @@ static int picocalc_bkl_get_brightness(struct backlight_device *bldev)
     u8 buf[2];
     int ret;
 
-    ret = regmap_bulk_read(bkl->regmap, REG_ID_BKL, buf, 2);
+    ret = regmap_bulk_read(bkl->regmap, bkl->reg, buf, 2);
     if (ret < 0)
         return ret;
 
@@ -54,6 +54,13 @@ static int picocalc_mfd_bkl_probe(struct platform_device *pdev)
     bkl = devm_kzalloc(dev, sizeof(*bkl), GFP_KERNEL);
     if (!bkl)
         return -ENOMEM;
+
+    u32 reg_addr;
+    if (of_property_read_u32(pdev->dev.of_node, "reg", &reg_addr)) {
+        dev_err(&pdev->dev, "Failed to get reg property\n");
+        return -EINVAL;
+    }
+    bkl->reg = reg_addr;
 
     bkl->regmap = dev_get_regmap(dev->parent, NULL);
     if (!bkl->regmap) {
