@@ -20,9 +20,34 @@ struct picocalc_mfd_bkl {
 static int picocalc_bkl_update_status(struct backlight_device *bldev)
 {
     struct picocalc_mfd_bkl *bkl = bl_get_data(bldev);
-    int brightness = bldev->props.brightness;
+    int brightness;
+    
+    /*
+     * Check for blanking via fb_blank or state flags (not props.power which stays at 0).
+     */
+    if (bldev->props.fb_blank != FB_BLANK_UNBLANK || 
+        bldev->props.state & (BL_CORE_FBBLANK | BL_CORE_SUSPENDED)) {
+        /*
+         * Blanking: poll hardware first to capture any button changes before turning off.
+         * This preserves the brightness value so it can be restored on unblank.
+         */
+        u8 buf[2];
+        int ret = regmap_bulk_read(bkl->regmap, bkl->reg, buf, 2);
+        if (ret == 0) {
+            bldev->props.brightness = buf[1];
+        } else {
+            dev_err(&bldev->dev, "Failed to read hw brightness before blanking, ret=%d\n", ret);
+        }
+        brightness = 0;
+    } else {
+        /*
+         * Active/Unblanking: just use props.brightness directly without polling.
+         * This restores the brightness that was saved during blanking.
+         */
+        brightness = bldev->props.brightness;
+    }
 
-    return regmap_write(bkl->regmap, (bkl->reg | (1<<7)) , brightness);
+    return regmap_write(bkl->regmap, bkl->reg | (1<<7), brightness);
 }
 
 static int picocalc_bkl_get_brightness(struct backlight_device *bldev)
@@ -32,11 +57,16 @@ static int picocalc_bkl_get_brightness(struct backlight_device *bldev)
     int ret;
 
     ret = regmap_bulk_read(bkl->regmap, bkl->reg, buf, 2);
-    if (ret < 0)
+    if (ret < 0) {
+        dev_err(&bldev->dev, "Failed to read brightness, ret=%d\n", ret);
         return ret;
+    }
 
-    /* The high byte contains the current brightness */
-    return buf[1];
+    /* Always keep track of actual hardware brightness */
+    bldev->props.brightness = buf[1];
+    
+    /* Return 0 if powered down, actual brightness otherwise */
+    return (bldev->props.power == FB_BLANK_POWERDOWN) ? 0 : buf[1];
 }
 
 static const struct backlight_ops picocalc_bkl_ops = {
@@ -71,26 +101,33 @@ static int picocalc_mfd_bkl_probe(struct platform_device *pdev)
     memset(&props, 0, sizeof(struct backlight_properties));
     props.type = BACKLIGHT_RAW;
     props.max_brightness = 255;
+    props.power = FB_BLANK_UNBLANK;  /* Initialize power state before registration */
+    
+    u32 initial_brightness;
+    if (!of_property_read_u32(pdev->dev.of_node, "default-brightness", &initial_brightness)) {
+        props.brightness = initial_brightness;
+    } else {
+        props.brightness = props.max_brightness / 2;
+    }
 
-    bkl->bldev = devm_backlight_device_register(dev, dev_name(dev),
+    const char *name = of_node_full_name(pdev->dev.of_node);
+    bkl->bldev = devm_backlight_device_register(dev, name,
                                                 dev->parent, bkl,
                                                 &picocalc_bkl_ops, &props);
     if (IS_ERR(bkl->bldev)) {
-        dev_err(dev, "Failed to register backlight device (error code: %ld)\n", PTR_ERR(bkl->bldev));
         return PTR_ERR(bkl->bldev);
     }
     
-    if (!dev->of_node->phandle) {
-        backlight_update_status(bkl->bldev);
-    }
-
+    /* Set initial hardware state to match registered properties */
+    backlight_update_status(bkl->bldev);
     platform_set_drvdata(pdev, bkl);
 
+    dev_info(dev, "LCD backlight registered successfully\n");
     return 0;
 }
 
 static const struct of_device_id picocalc_mfd_bkl_of_match[] = {
-    { .compatible = "picocalc_mfd_bkl", },
+    { .compatible = "picocalc-mfd-bkl" },
     {}
 };
 MODULE_DEVICE_TABLE(of, picocalc_mfd_bkl_of_match);
