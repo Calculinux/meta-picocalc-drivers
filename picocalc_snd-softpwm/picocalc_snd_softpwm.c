@@ -455,6 +455,7 @@ static int picocalc_probe(struct platform_device *pdev)
 	}
 
 	platform_set_drvdata(pdev, picocalc);
+	dev_info(&pdev->dev, "Sound driver (Software PWM) registered successfully\n");
 	return 0;
 }
 

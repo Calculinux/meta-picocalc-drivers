@@ -106,11 +106,12 @@ static int picocalc_mfd_bms_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, bat);
 
+	dev_info(dev, "Battery monitoring system registered successfully\n");
 	return 0;
 }
 
 static const struct of_device_id picocalc_mfd_bms_of_match[] = {
-    { .compatible = "picocalc_mfd_bms", },
+    { .compatible = "picocalc-mfd-bms", },
     {}
 };
 MODULE_DEVICE_TABLE(of, picocalc_mfd_bms_of_match);
