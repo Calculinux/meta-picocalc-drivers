@@ -3,9 +3,23 @@
  * PicoCalc hardware device tree definitions for Luckfox Lyra board
  */
 
-#include <dt-bindings/pinctrl/rockchip.h>
-
 /****** Picocalc i2c Bus ******/
+&pinctrl {
+    rm_io11 {
+        rm_io11_i2c2_sda: rm-io11-i2c2-sda {
+            rockchip,pins =
+                <0 RK_PB3 35 &pcfg_pull_none>;
+        };
+    };
+
+    rm_io10 {
+        rm_io10_i2c2_scl: rm-io10-i2c2-scl {
+            rockchip,pins =
+                <0 RK_PB2 34 &pcfg_pull_none>;
+        };
+    };
+};
+
 &i2c2{
 	status = "okay";
 	pinctrl-names = "default";
@@ -51,6 +65,17 @@
 };
 
 /****** Picocalc Display ******/
+&pinctrl {
+	ili9488 {
+		ili9488_pins: ili9488-pins {
+			rockchip,pins =
+				<0 RK_PA4 RK_FUNC_GPIO &pcfg_pull_none>,
+				<0 RK_PA3 RK_FUNC_GPIO &pcfg_pull_none>,
+				<0 RK_PA2 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+	};
+};
+
 &spi0 {
 	status = "okay";
 	pinctrl-names = "default";
@@ -70,17 +95,6 @@
 		dc = <&gpio0 RK_PA3 GPIO_ACTIVE_HIGH>;
 		rst = <&gpio0 RK_PA2 GPIO_ACTIVE_HIGH>;
 		backlight = <&picocalc_mfd_bkl>;
-	};
-};
-
-&pinctrl {
-	ili9488 {
-		ili9488_pins: ili9488-pins {
-			rockchip,pins =
-				<0 RK_PA4 RK_FUNC_GPIO &pcfg_pull_none>,
-				<0 RK_PA3 RK_FUNC_GPIO &pcfg_pull_none>,
-				<0 RK_PA2 RK_FUNC_GPIO &pcfg_pull_none>;
-		};
 	};
 };
 
@@ -105,6 +119,16 @@
 };
 
 /****** PWM Sound via Hardware Mod ******/
+&pinctrl {
+	picocalc_snd {
+		snd_pins: snd-pins {
+			rockchip,pins =
+				<4 RK_PB2 RK_FUNC_GPIO &pcfg_pull_none>,
+				<4 RK_PB3 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+	};
+};
+
 / {
 	picocalc_snd {
 		status = "okay";
@@ -132,14 +156,4 @@
 	status = "okay";
 	assigned-clocks = <&cru CLK_PWM0>;
 	assigned-clock-rates = <100000000>;
-};
-
-&pinctrl {
-	picocalc_snd {
-		snd_pins: snd-pins {
-			rockchip,pins =
-				<4 RK_PB2 RK_FUNC_GPIO &pcfg_pull_none>,
-				<4 RK_PB3 RK_FUNC_GPIO &pcfg_pull_none>;
-		};
-	};
 };
