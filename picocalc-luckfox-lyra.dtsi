@@ -1,34 +1,38 @@
 // SPDX-License-Identifier: (GPL-2.0+ OR MIT)
 /*
- * PicoCalc hardware device tree definitions
- * for Luckfox Lyra board
+ * PicoCalc hardware device tree definitions for Luckfox Lyra board
  */
 
 #include <dt-bindings/pinctrl/rockchip.h>
 
+/****** Picocalc i2c Bus ******/
 &i2c2{
 	status = "okay";
 	pinctrl-names = "default";
 	pinctrl-0 = <&rm_io10_i2c2_scl &rm_io11_i2c2_sda>;
 	max-frequency = <400000>;
 
+	/****** Picocalc STM32 Firmware ******/
 	picocalc_mfd: picocalc-mfd@1f {
 		status = "okay";
 		compatible = "picocalc-mfd","picocalc-kbd";
 		reg = <0x1F>;
 		poweroff = <0x0E>;
 
+		/****** Keyboard Subsystem ******/
 		picocalc_mfd_kbd: picocalc-mfd-kbd@04 {
 			compatible = "picocalc-mfd-kbd";
 			reg = <0x04>;
 			fifo = <0x09>;
 		};
 
+		/****** Battery Subsystem ******/
 		picocalc_mfd_bms: picocalc-mfd-bms@0b {
 			compatible = "picocalc-mfd-bms";
 			reg = <0x0B>;
 		};
 
+		/****** Display Backlight ******/
 		picocalc_mfd_bkl: picocalc-mfd-bkl@05 {
 			compatible = "picocalc-mfd-bkl";
 			reg = <0x05>;
@@ -36,6 +40,7 @@
 			max-brightness = <255>;
 		};
 
+		/****** Keyboard Backlight ******/
 		picocalc_mfd_led: picocalc-mfd-led@0a {
 			compatible = "picocalc-mfd-led";
 			linux,default-trigger = "backlight";
@@ -45,6 +50,7 @@
 	};
 };
 
+/****** Picocalc Display ******/
 &spi0 {
 	status = "okay";
 	pinctrl-names = "default";
@@ -54,8 +60,6 @@
 		status = "okay";
 		compatible = "ilitek,ili9488";
 		spi-max-frequency = <80000000>;
-		/* spi-max-frequency = <24000000>; */
-		/* spi-max-frequency = <10000000>; */
 		reg = <0>;
 		pinctrl-names = "default";
 		pinctrl-0 = <&ili9488_pins>;
@@ -69,6 +73,18 @@
 	};
 };
 
+&pinctrl {
+	ili9488 {
+		ili9488_pins: ili9488-pins {
+			rockchip,pins =
+				<0 RK_PA4 RK_FUNC_GPIO &pcfg_pull_none>,
+				<0 RK_PA3 RK_FUNC_GPIO &pcfg_pull_none>,
+				<0 RK_PA2 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+	};
+};
+
+/****** Picocalc SD Card Reader ******/
 &spi1 {
 	status = "okay";
 	pinctrl-names = "default";
@@ -88,6 +104,7 @@
 	};
 };
 
+/****** PWM Sound via Hardware Mod ******/
 / {
 	picocalc_snd {
 		status = "okay";
@@ -118,15 +135,6 @@
 };
 
 &pinctrl {
-	ili9488 {
-		ili9488_pins: ili9488-pins {
-			rockchip,pins =
-				<0 RK_PA4 RK_FUNC_GPIO &pcfg_pull_none>,
-				<0 RK_PA3 RK_FUNC_GPIO &pcfg_pull_none>,
-				<0 RK_PA2 RK_FUNC_GPIO &pcfg_pull_none>;
-		};
-	};
-
 	picocalc_snd {
 		snd_pins: snd-pins {
 			rockchip,pins =
