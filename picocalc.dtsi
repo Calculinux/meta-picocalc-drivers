@@ -1,0 +1,137 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * PicoCalc hardware device tree definitions
+ * for Luckfox Lyra board
+ */
+
+#include <dt-bindings/pinctrl/rockchip.h>
+
+&i2c2{
+	status = "okay";
+	pinctrl-names = "default";
+	pinctrl-0 = <&rm_io10_i2c2_scl &rm_io11_i2c2_sda>;
+	max-frequency = <400000>;
+
+	picocalc_mfd: picocalc-mfd@1f {
+		status = "okay";
+		compatible = "picocalc-mfd","picocalc-kbd";
+		reg = <0x1F>;
+		poweroff = <0x0E>;
+
+		picocalc_mfd_kbd: picocalc-mfd-kbd@04 {
+			compatible = "picocalc-mfd-kbd";
+			reg = <0x04>;
+			fifo = <0x09>;
+		};
+
+		picocalc_mfd_bms: picocalc-mfd-bms@0b {
+			compatible = "picocalc-mfd-bms";
+			reg = <0x0B>;
+		};
+
+		picocalc_mfd_bkl: picocalc-mfd-bkl@05 {
+			compatible = "picocalc-mfd-bkl";
+			reg = <0x05>;
+			default-brightness = <128>;
+			max-brightness = <255>;
+		};
+
+		picocalc_mfd_led: picocalc-mfd-led@0a {
+			compatible = "picocalc-mfd-led";
+			linux,default-trigger = "backlight";
+			reg = <0x0A>;
+			label = "picocalc_mfd_led:kbd_backlight";
+		};
+	};
+};
+
+&spi0 {
+	status = "okay";
+	pinctrl-names = "default";
+	pinctrl-0 = <&rm_io7_spi0_clk &rm_io6_spi0_mosi &rm_io5_spi0_miso>;
+
+	ili9488: ili9488@0 {
+		status = "okay";
+		compatible = "ilitek,ili9488";
+		spi-max-frequency = <80000000>;
+		/* spi-max-frequency = <24000000>; */
+		/* spi-max-frequency = <10000000>; */
+		reg = <0>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&ili9488_pins>;
+		fps = <30>;
+		width = <320>;
+		height = <320>;
+		cs = <&gpio0 RK_PA4 GPIO_ACTIVE_HIGH>;
+		dc = <&gpio0 RK_PA3 GPIO_ACTIVE_HIGH>;
+		rst = <&gpio0 RK_PA2 GPIO_ACTIVE_HIGH>;
+		backlight = <&picocalc_mfd_bkl>;
+	};
+};
+
+&spi1 {
+	status = "okay";
+	pinctrl-names = "default";
+	pinctrl-0 = <&rm_io29_spi1_clk &rm_io28_spi1_mosi &rm_io31_spi1_miso &rm_io30_spi1_csn0>;
+
+	spi_mmc: mmc@0 {
+		compatible = "mmc-spi-slot";
+		reg = <0>;  // Chip Select 0
+		spi-max-frequency = <50000000>;
+		cd-gpios = <&gpio1 RK_PB2 GPIO_ACTIVE_LOW>;
+		disable-wp;
+		no-sdio;
+		voltage-ranges = <3300 3300>;
+		vmmc-supply = <&vcc_3v3>;
+		vqmmc-supply = <&vcc_3v3>;
+		no-1-8-v;
+	};
+};
+
+/ {
+	picocalc_snd {
+		status = "okay";
+		compatible = "fsl,picocalc-snd-pwm";
+		pinctrl-names = "default";
+		pinctrl-0 = <&snd_pins>;
+		leftpin = <&gpio4 RK_PB2 GPIO_ACTIVE_HIGH>;
+		rightpin = <&gpio4 RK_PB3 GPIO_ACTIVE_HIGH>;
+		pwm-names = "pwm-snd-left", "pwm-snd-right";
+		pwms = <&pwm0_4ch_0 0 25000 0>, <&pwm0_4ch_1 0 25000 0>;
+	};
+};
+
+&pwm0_4ch_0 {
+	pinctrl-names = "active";
+	pinctrl-0 = <&rm_io12_pwm0_ch0>;
+	status = "okay";
+	assigned-clocks = <&cru CLK_PWM0>;
+	assigned-clock-rates = <100000000>;
+};
+
+&pwm0_4ch_1 {
+	pinctrl-names = "active";
+	pinctrl-0 = <&rm_io13_pwm0_ch1>;
+	status = "okay";
+	assigned-clocks = <&cru CLK_PWM0>;
+	assigned-clock-rates = <100000000>;
+};
+
+&pinctrl {
+	ili9488 {
+		ili9488_pins: ili9488-pins {
+			rockchip,pins =
+				<0 RK_PA4 RK_FUNC_GPIO &pcfg_pull_none>,
+				<0 RK_PA3 RK_FUNC_GPIO &pcfg_pull_none>,
+				<0 RK_PA2 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+	};
+
+	picocalc_snd {
+		snd_pins: snd-pins {
+			rockchip,pins =
+				<4 RK_PB2 RK_FUNC_GPIO &pcfg_pull_none>,
+				<4 RK_PB3 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+	};
+};

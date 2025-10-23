@@ -12,12 +12,7 @@
 #include <linux/platform_device.h>
 #include <linux/regmap.h>
 #include <linux/of.h>
-/* The keyboard is communicating with the stm32, which runs the kb firmware.
- * The stm32 also is responsible for the power management.
- * Therefore we need to turn off the power through the kb driver.
- */
-#include <linux/notifier.h>
-#include <linux/reboot.h>
+
 
 #include "picocalc_kbd_code.h"
 
@@ -36,16 +31,9 @@
 #define KBD_PRODUCT_ID      0x0001
 #define KBD_VERSION_ID      0x0001
 
-#define KBD_POWEROFF_SEC 1
-/*
-#include "input_iface.h"
-#include "params_iface.h"
-#include "sysfs_iface.h"
-*/
-
 #define KBD_FIFO_SIZE               31
 
-static uint32_t sysfs_gid_setting = 0; // GID of files in /sys/firmware/picocalc
+
 
 static uint64_t mouse_fast_move_thr_time = 150000000ull;
 static int8_t mouse_move_step = 1;
@@ -90,8 +78,6 @@ struct kbd_ctx
 
     int mouse_mode;
     uint8_t mouse_move_dir;
-
-    struct notifier_block reboot_nb;
 };
 
 // Parse 0 to 255 from string
@@ -176,7 +162,6 @@ void input_fw_read_fifo(struct kbd_ctx* ctx)
     ctx->key_fifo_count = 0;
 
     // Read and transfer all FIFO items
-
     for (fifo_idx = 0; fifo_idx < KBD_FIFO_SIZE; fifo_idx++) {
 
         uint8_t data[2];
@@ -207,7 +192,7 @@ void input_fw_read_fifo(struct kbd_ctx* ctx)
             ctx->key_fifo_data[fifo_idx].state,
             ctx->key_fifo_data[fifo_idx].scancode);
         /*
-    printk("%02d: 0x%02x%02x State %d Scancode %d\n",
+        printk("%02d: 0x%02x%02x State %d Scancode %d\n",
             fifo_idx,
             ((uint8_t*)&ctx->key_fifo_data[fifo_idx])[0],
             ((uint8_t*)&ctx->key_fifo_data[fifo_idx])[1],
@@ -322,10 +307,8 @@ static void key_report_event(struct kbd_ctx* ctx,
     input_event(ctx->input_dev, EV_MSC, MSC_SCAN, ev->scancode);
 
     // Map input scancode to Linux input keycode
-
     keycode = keycodes[ev->scancode];
 
-    //keycode = ev->scancode;
     dev_info_fe(&ctx->i2c_client->dev,
         "%s state %d, scancode %d mapped to keycode %d\n",
         __func__, ev->state, ev->scancode, keycode);
@@ -392,7 +375,7 @@ static void key_report_event(struct kbd_ctx* ctx,
     input_report_key(ctx->input_dev, keycode, ev->state == KEY_STATE_PRESSED);
 
     // Reset sticky modifiers
-//  input_modifiers_reset(ctx);
+    // input_modifiers_reset(ctx);
 }
 
 static void input_workqueue_handler(struct work_struct *work_struct_ptr)
@@ -486,34 +469,6 @@ int input_probe(struct i2c_client* i2c_client, struct regmap* regmap)
     g_ctx->regmap = regmap;
     g_ctx->last_keypress_at = ktime_get_boottime_ns();
 
-    // Run subsystem probes
-    /*
-    if ((rc = input_fw_probe(i2c_client, g_ctx))) {
-        dev_err(&i2c_client->dev, "picocalc_mfd_kbd: input_fw_probe failed\n");
-        return rc;
-    }
-    if ((rc = input_rtc_probe(i2c_client, g_ctx))) {
-        dev_err(&i2c_client->dev, "picocalc_mfd_kbd: input_rtc_probe failed\n");
-        return rc;
-    }
-    if ((rc = input_display_probe(i2c_client, g_ctx))) {
-        dev_err(&i2c_client->dev, "picocalc_mfd_kbd: input_display_probe failed\n");
-        return rc;
-    }
-    if ((rc = input_modifiers_probe(i2c_client, g_ctx))) {
-        dev_err(&i2c_client->dev, "picocalc_mfd_kbd: input_modifiers_probe failed\n");
-        return rc;
-    }
-    if ((rc = input_touch_probe(i2c_client, g_ctx))) {
-        dev_err(&i2c_client->dev, "picocalc_mfd_kbd: input_touch_probe failed\n");
-        return rc;
-    }
-    if ((rc = input_meta_probe(i2c_client, g_ctx))) {
-        dev_err(&i2c_client->dev, "picocalc_mfd_kbd: input_meta_probe failed\n");
-        return rc;
-    }
-    */
-
     // Allocate input device
     if ((g_ctx->input_dev = devm_input_allocate_device(&i2c_client->dev)) == NULL) {
         dev_err(&i2c_client->dev,
@@ -548,8 +503,8 @@ int input_probe(struct i2c_client* i2c_client, struct regmap* regmap)
 /*
     input_set_capability(g_ctx->input_dev, EV_ABS, ABS_X);
     input_set_capability(g_ctx->input_dev, EV_ABS, ABS_Y);
-        input_set_abs_params(g_ctx->input_dev, ABS_X, 0, 320, 4, 8);
-        input_set_abs_params(g_ctx->input_dev, ABS_Y, 0, 320, 4, 8);
+    input_set_abs_params(g_ctx->input_dev, ABS_X, 0, 320, 4, 8);
+    input_set_abs_params(g_ctx->input_dev, ABS_Y, 0, 320, 4, 8);
 */
     input_set_capability(g_ctx->input_dev, EV_KEY, BTN_LEFT);
     input_set_capability(g_ctx->input_dev, EV_KEY, BTN_RIGHT);
@@ -565,8 +520,8 @@ int input_probe(struct i2c_client* i2c_client, struct regmap* regmap)
         return rc;
     }
     */
-        g_ctx->mouse_mode = FALSE;
-        g_ctx->mouse_move_dir = 0;
+    g_ctx->mouse_mode = FALSE;
+    g_ctx->mouse_move_dir = 0;
     INIT_WORK(&g_ctx->work_struct, input_workqueue_handler);
     g_kbd_timer.expires = jiffies + HZ / 128;
     add_timer(&g_kbd_timer);
@@ -580,208 +535,15 @@ int input_probe(struct i2c_client* i2c_client, struct regmap* regmap)
         return rc;
     }
 
-
-
     return 0;
 }
 
 void input_shutdown(struct i2c_client* i2c_client)
 {
-    // Run subsystem shutdowns
-    /*
-    input_meta_shutdown(i2c_client, g_ctx);
-    input_touch_shutdown(i2c_client, g_ctx);
-    input_modifiers_shutdown(i2c_client, g_ctx);
-    input_display_shutdown(i2c_client, g_ctx);
-    input_rtc_shutdown(i2c_client, g_ctx);
-    input_fw_shutdown(i2c_client, g_ctx);
-    */
-
     // Remove context from global state
     // (It is freed by the device-specific memory mananger)
     del_timer(&g_kbd_timer);
     g_ctx = NULL;
-}
-
-uint32_t params_get_sysfs_gid(void)
-{
-    return sysfs_gid_setting;
-}
-
-// Read battery percent over I2C
-static int read_battery_percent(void)
-{
-    int rc;
-    uint8_t percent[2];
-
-    // Make sure I2C client was initialized
-    if ((g_ctx == NULL) || (g_ctx->i2c_client == NULL)) {
-        return -EINVAL;
-    }
-
-    // Read battery level
-    if ((rc = kbd_read_i2c_2u8(g_ctx, REG_ID_BAT, percent)) < 0) {
-        return rc;
-    }
-
-    // Calculate raw battery level
-    return percent[1];
-}
-
-static int parse_and_write_i2c_u8(char const* buf, size_t count, uint8_t reg)
-{
-    int parsed;
-
-    // Parse string entry
-    if ((parsed = parse_u8(buf)) < 0) {
-        return -EINVAL;
-    }
-
-    // Write value to LED register if available
-    if (g_ctx && g_ctx->i2c_client) {
-        kbd_write_i2c_u8(g_ctx, reg, (uint8_t)parsed);
-    }
-
-    return count;
-}
-
-// Sysfs entries
-
-// Battery percent approximate
-static ssize_t battery_percent_show(struct kobject *kobj, struct kobj_attribute *attr,
-    char *buf)
-{
-    int percent;
-
-    if ((percent = read_battery_percent()) < 0) {
-        return percent;
-    }
-
-    // Format into buffer
-    return sprintf(buf, "%d\n", percent);
-}
-struct kobj_attribute battery_percent_attr
-    = __ATTR(battery_percent, 0444, battery_percent_show, NULL);
-
-// Keyboard backlight value
-static ssize_t __used keyboard_backlight_store(struct kobject *kobj,
-    struct kobj_attribute *attr, char const *buf, size_t count)
-{
-    return parse_and_write_i2c_u8(buf, count, REG_ID_BK2);
-}
-struct kobj_attribute keyboard_backlight_attr
-    = __ATTR(keyboard_backlight, 0220, NULL, keyboard_backlight_store);
-
-// screen backlight value
-static ssize_t __used screen_backlight_store(struct kobject *kobj,
-    struct kobj_attribute *attr, char const *buf, size_t count)
-{
-    return parse_and_write_i2c_u8(buf, count, REG_ID_BKL);
-}
-struct kobj_attribute screen_backlight_attr
-    = __ATTR(screen_backlight, 0220, NULL, screen_backlight_store);
-
-// Time since last keypress in milliseconds
-static ssize_t last_keypress_show(struct kobject *kobj, struct kobj_attribute *attr,
-    char *buf)
-{
-    uint64_t last_keypress_ms;
-
-    if (g_ctx) {
-
-        // Get time in ns
-        last_keypress_ms = ktime_get_boottime_ns();
-        if (g_ctx->last_keypress_at < last_keypress_ms) {
-            last_keypress_ms -= g_ctx->last_keypress_at;
-
-            // Calculate time in milliseconds
-            last_keypress_ms = div_u64(last_keypress_ms, 1000000);
-
-            // Format into buffer
-            return sprintf(buf, "%lld\n", last_keypress_ms);
-        }
-    }
-
-    return sprintf(buf, "-1\n");
-}
-struct kobj_attribute last_keypress_attr
-    = __ATTR(last_keypress, 0444, last_keypress_show, NULL);
-
-// Sysfs attributes (entries)
-struct kobject *picocalc_kobj = NULL;
-static struct attribute *picocalc_attrs[] = {
-    &battery_percent_attr.attr,
-    &screen_backlight_attr.attr,
-    &last_keypress_attr.attr,
-    &keyboard_backlight_attr.attr,
-    NULL,
-};
-static struct attribute_group picocalc_attr_group = {
-    .attrs = picocalc_attrs
-};
-
-static void picocalc_get_ownership
-#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 6, 0)
-(struct kobject *kobj, kuid_t *uid, kgid_t *gid)
-#else
-(struct kobject const *kobj, kuid_t *uid, kgid_t *gid)
-#endif
-{
-    if (gid != NULL) {
-        gid->val = params_get_sysfs_gid();
-    }
-}
-
-static struct kobj_type picocalc_ktype = {
-    .get_ownership = picocalc_get_ownership,
-    .sysfs_ops = &kobj_sysfs_ops
-};
-
-int sysfs_probe(struct i2c_client* i2c_client)
-{
-    int rc;
-
-    // Allocate custom sysfs type
-    if ((picocalc_kobj = devm_kzalloc(&i2c_client->dev, sizeof(*picocalc_kobj), GFP_KERNEL)) == NULL) {
-        return -ENOMEM;
-    }
-
-    // Create sysfs entries for picocalc with custom type
-    rc = kobject_init_and_add(picocalc_kobj, &picocalc_ktype, firmware_kobj, "picocalc");
-    if (rc < 0) {
-        kobject_put(picocalc_kobj);
-        return rc;
-    }
-
-    // Create sysfs attributes
-    if (sysfs_create_group(picocalc_kobj, &picocalc_attr_group)) {
-        kobject_put(picocalc_kobj);
-        return -ENOMEM;
-    }
-
-    return 0;
-}
-
-void sysfs_shutdown(struct i2c_client* i2c_client)
-{
-    // Remove sysfs entry
-    if (picocalc_kobj) {
-        kobject_put(picocalc_kobj);
-        picocalc_kobj = NULL;
-    }
-}
-
-static int picocalc_mfd_kbd_reboot_notifier(struct notifier_block *nb,
-                              unsigned long action, void *data)
-{
-    if (action == SYS_POWER_OFF || action  == SYS_HALT) {
-        dev_info(&g_ctx->i2c_client->dev,
-                 "%s sending poweroff event\n", __func__);
-
-        // Register REG_ID_OFF
-        kbd_write_i2c_u8(g_ctx, 0x0e, KBD_POWEROFF_SEC);
-    }
-    return NOTIFY_DONE;
 }
 
 static int picocalc_mfd_kbd_probe(struct platform_device *pdev)
@@ -801,18 +563,9 @@ static int picocalc_mfd_kbd_probe(struct platform_device *pdev)
         return rc;
     }
 
-    // Initialize sysfs interface
-    if ((rc = sysfs_probe(i2c))) {
-        return rc;
-    }
-
-    g_ctx->reboot_nb.notifier_call = picocalc_mfd_kbd_reboot_notifier;
-    g_ctx->reboot_nb.priority = 128;
-
-    register_reboot_notifier(&g_ctx->reboot_nb);
-
     platform_set_drvdata(pdev, g_ctx);
 
+    dev_info(dev, "Keyboard input driver registered successfully\n");
     return 0;
 }
 
@@ -822,15 +575,13 @@ static int picocalc_mfd_kbd_remove(struct platform_device *pdev)
 
     dev_info_fe(&pdev->dev, "%s Removing picocalc-kbd.\n", __func__);
 
-    unregister_reboot_notifier(&ctx->reboot_nb);
-    sysfs_shutdown(ctx->i2c_client);
     input_shutdown(ctx->i2c_client);
 
     return 0;
 }
 
 static const struct of_device_id picocalc_mfd_kbd_of_match[] = {
-    { .compatible = "picocalc_mfd_kbd", },
+    { .compatible = "picocalc-mfd-kbd", },
     {}
 };
 MODULE_DEVICE_TABLE(of, picocalc_mfd_kbd_of_match);
