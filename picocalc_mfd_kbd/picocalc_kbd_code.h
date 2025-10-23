@@ -1,49 +1,18 @@
-/* SPDX-License-Identifier: GPL-2.0 */
+// SPDX-License-Identifier: GPL-2.0-only
 /*
- * Keyboard Driver for Blackberry Keyboards BBQ10 from arturo182. Software written by wallComputer.
- * bbq10kbd_codes.h: Keyboard Layout and Scancodes-Keycodes mapping.
+ * Keyboard Driver for picocalc
  */
 
-#ifndef BBQ10KBD_PMOD_CODES_H_
-#define BBQ10KBD_PMOD_CODES_H_
+#ifndef PICOCALC_KBD_CODES_H_
+#define PICOCALC_KBD_CODES_H_
 
 /*
- *					BBQ10KBD PMOD KEYBOARD LAYOUT
- *
- *	+------+-----+----+----+----+----+----+-----+-----+-------+
- *	|#     |1    |2   |3   |(   |   )|_   |    -|    +|      @|
- *	|  Q   |  W  | E  | R  | T  |  Y |  U |  I  |  O  |   P   |
- *	|    S+|   S-|PgUp|PgDn|   \|UP  |^   |=    |{    |}      |
- *	+------+-----+----+----+----+----+----+-----+-----+-------+
- *	|*     |4    |5   |6   |/   |   :|;   |    '|    "|    ESC|
- *	|  A   |  S  | D  | F  | G  |  H |  J |  K  |  L  |  BKSP |
- *	|     ?|   Sx|   [|   ]|LEFT|HOME|RGHT|V+   |V-   |DLT    |
- *	+------+-----+----+----+----+----+----+-----+-----+-------+
- *	|      |7    |8   |9   |?   |   !|,   |    .|    `|       |
- *	|LFTALT|  Z  | X  | C  | V  |  B |  N |  M  |  $  | ENTER |
- *	|      |   K+|  K-|   °|   <|DOWN|>   |MENU |Vx   |       |
- *	+------+-----+----+----+----+----+----+-----+-----+-------+
- *	|            |0   |TAO                |     |             |
- *	| LEFT_SHIFT | ~  |       SPACE       |RTALT| RIGHT_SHIFT |
- *	|            |  Kx|                  &|     |             |
- *	+------------+----+-------------------+-----+-------------+
- *
- * Notes:
- * Most Important to know:
- * To present a character as mentioned above a key in the above layout, use LFTALT + Key.
- * To present a character as mentioned below a key in the above layout, use RTALT + Key.
- *
- * Changes from arturo182's layout, if you are used to that, it's good to know these changes.
- * 1. Sym Key (Scancode 0x1D) on Keyboard is mapped to RTALT.
- * 2. Note "|" above Enter Key as per original keyboard layout is removed and added under "A"
- * 3. The external buttons on the Keyboard Featherwing have been changed as below:
- *__3.1 Leftmost Button changed from Menu Key to Left Ctrl Key.
- *__3.2 Innet Left Button changed from Left Ctrl Key to Page Up Key.
- *__3.3 Inner Right Button changed from Back Key to Page Down Key.
- *__3.4 Outer Right Button changed from Left Shift Key to Menu Key.
- *__3.5 Center Key of 5-way Button changed from Enter Key to Home Key.
+ * The PicoCalc Keyboard firmware v1.2 Note:
+ * The keyboard firmware itself handles the logic of the modifier keys and CapsLock;
+ * Alt is used to activate some of the machine's own functions, such as backlight, keyboard light;
+ * These functions will stop the scancode output except the modify_key itself;
+ * Shift + UP/DOWN/Enter trigger PageUp/PageDown/Insert. It's not printed/mentioned anywhere except the firmware source code.
  */
-
 
 #define NUM_KEYCODES	256
 
@@ -110,8 +79,6 @@ static unsigned short keycodes[NUM_KEYCODES] = {
 	['Z'] = KEY_Z,
 
 	[' '] = KEY_SPACE,
-	['~'] = KEY_0,
-	['$'] = KEY_4,
 
 	['\b'] = KEY_BACKSPACE,
 	['\n'] = KEY_ENTER,
@@ -133,6 +100,17 @@ static unsigned short keycodes[NUM_KEYCODES] = {
 	['8'] = KEY_8,
 	['9'] = KEY_9,
 
+	[')'] = KEY_0,
+	['('] = KEY_9,
+	['*'] = KEY_8,
+	['&'] = KEY_7,
+	['^'] = KEY_6,
+	['%'] = KEY_5,
+	['$'] = KEY_4,
+	['#'] = KEY_3,
+	['@'] = KEY_2,
+	['!'] = KEY_1,
+
 	[0x81] = KEY_F1,
 	[0x82] = KEY_F2,
 	[0x83] = KEY_F3,
@@ -144,8 +122,6 @@ static unsigned short keycodes[NUM_KEYCODES] = {
 	[0x89] = KEY_F9,
 	[0x90] = KEY_F10,
 
-	['#'] = KEY_3,
-	['@'] = KEY_2,
 	[0x08] = KEY_BACKSPACE,
 	[0xD4] = KEY_DELETE,
 	[0xD5] = KEY_END,
@@ -153,7 +129,7 @@ static unsigned short keycodes[NUM_KEYCODES] = {
 	[0x09] = KEY_TAB,
 	[0xD2] = KEY_HOME,
 	[0xB1] = KEY_ESC,
-	[0xd0] = KEY_BREAK,
+//	[0xd0] = KEY_BREAK,
 	[0xd0] = KEY_PAUSE,
 	['='] = KEY_EQUAL,
 	['+'] = KEY_EQUAL,
@@ -161,12 +137,8 @@ static unsigned short keycodes[NUM_KEYCODES] = {
 	['_'] = KEY_MINUS,
 	['\\'] = KEY_BACKSLASH,
 	['|'] = KEY_BACKSLASH,
-	['!'] = KEY_1,
-	[0xD1] = KEY_INSERT,
-	['*'] = KEY_8,
-	['&'] = KEY_7,
-	['^'] = KEY_6,
-	['%'] = KEY_5,
+
+	[0xD1] = KEY_ENTER,// Because Shift + Enter will be reported as Insert, special handling
 
 	['.'] = KEY_DOT,
 	['>'] = KEY_DOT,
@@ -185,9 +157,6 @@ static unsigned short keycodes[NUM_KEYCODES] = {
 
 	['?'] = KEY_SLASH,
 	['/'] = KEY_SLASH,
-
-	[')'] = KEY_0,
-	['('] = KEY_9,
 
 	[']'] = KEY_RIGHTBRACE,
 	['}'] = KEY_RIGHTBRACE,
