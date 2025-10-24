@@ -1,10 +1,24 @@
 // SPDX-License-Identifier: (GPL-2.0+ OR MIT)
 /*
- * PicoCalc hardware device tree definitions
- * for Luckfox Lyra board
+ * PicoCalc hardware device tree definitions for Luckfox Lyra board
  */
 
-#include <dt-bindings/pinctrl/rockchip.h>
+/****** Picocalc i2c Bus ******/
+&pinctrl {
+    rm_io11 {
+        rm_io11_i2c2_sda: rm-io11-i2c2-sda {
+            rockchip,pins =
+                <0 RK_PB3 35 &pcfg_pull_none>;
+        };
+    };
+
+    rm_io10 {
+        rm_io10_i2c2_scl: rm-io10-i2c2-scl {
+            rockchip,pins =
+                <0 RK_PB2 34 &pcfg_pull_none>;
+        };
+    };
+};
 
 &i2c2{
 	status = "okay";
@@ -12,23 +26,27 @@
 	pinctrl-0 = <&rm_io10_i2c2_scl &rm_io11_i2c2_sda>;
 	max-frequency = <400000>;
 
+	/****** Picocalc STM32 Firmware ******/
 	picocalc_mfd: picocalc-mfd@1f {
 		status = "okay";
 		compatible = "picocalc-mfd","picocalc-kbd";
 		reg = <0x1F>;
 		poweroff = <0x0E>;
 
+		/****** Keyboard Subsystem ******/
 		picocalc_mfd_kbd: picocalc-mfd-kbd@04 {
 			compatible = "picocalc-mfd-kbd";
 			reg = <0x04>;
 			fifo = <0x09>;
 		};
 
+		/****** Battery Subsystem ******/
 		picocalc_mfd_bms: picocalc-mfd-bms@0b {
 			compatible = "picocalc-mfd-bms";
 			reg = <0x0B>;
 		};
 
+		/****** Display Backlight ******/
 		picocalc_mfd_bkl: picocalc-mfd-bkl@05 {
 			compatible = "picocalc-mfd-bkl";
 			reg = <0x05>;
@@ -36,11 +54,24 @@
 			max-brightness = <255>;
 		};
 
+		/****** Keyboard Backlight ******/
 		picocalc_mfd_led: picocalc-mfd-led@0a {
 			compatible = "picocalc-mfd-led";
 			linux,default-trigger = "backlight";
 			reg = <0x0A>;
 			label = "picocalc_mfd_led:kbd_backlight";
+		};
+	};
+};
+
+/****** Picocalc Display ******/
+&pinctrl {
+	ili9488 {
+		ili9488_pins: ili9488-pins {
+			rockchip,pins =
+				<0 RK_PA4 RK_FUNC_GPIO &pcfg_pull_none>,
+				<0 RK_PA3 RK_FUNC_GPIO &pcfg_pull_none>,
+				<0 RK_PA2 RK_FUNC_GPIO &pcfg_pull_none>;
 		};
 	};
 };
@@ -54,8 +85,6 @@
 		status = "okay";
 		compatible = "ilitek,ili9488";
 		spi-max-frequency = <80000000>;
-		/* spi-max-frequency = <24000000>; */
-		/* spi-max-frequency = <10000000>; */
 		reg = <0>;
 		pinctrl-names = "default";
 		pinctrl-0 = <&ili9488_pins>;
@@ -69,6 +98,7 @@
 	};
 };
 
+/****** Picocalc SD Card Reader ******/
 &spi1 {
 	status = "okay";
 	pinctrl-names = "default";
@@ -85,6 +115,17 @@
 		vmmc-supply = <&vcc_3v3>;
 		vqmmc-supply = <&vcc_3v3>;
 		no-1-8-v;
+	};
+};
+
+/****** PWM Sound via Hardware Mod ******/
+&pinctrl {
+	picocalc_snd {
+		snd_pins: snd-pins {
+			rockchip,pins =
+				<4 RK_PB2 RK_FUNC_GPIO &pcfg_pull_none>,
+				<4 RK_PB3 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
 	};
 };
 
@@ -115,23 +156,4 @@
 	status = "okay";
 	assigned-clocks = <&cru CLK_PWM0>;
 	assigned-clock-rates = <100000000>;
-};
-
-&pinctrl {
-	ili9488 {
-		ili9488_pins: ili9488-pins {
-			rockchip,pins =
-				<0 RK_PA4 RK_FUNC_GPIO &pcfg_pull_none>,
-				<0 RK_PA3 RK_FUNC_GPIO &pcfg_pull_none>,
-				<0 RK_PA2 RK_FUNC_GPIO &pcfg_pull_none>;
-		};
-	};
-
-	picocalc_snd {
-		snd_pins: snd-pins {
-			rockchip,pins =
-				<4 RK_PB2 RK_FUNC_GPIO &pcfg_pull_none>,
-				<4 RK_PB3 RK_FUNC_GPIO &pcfg_pull_none>;
-		};
-	};
 };

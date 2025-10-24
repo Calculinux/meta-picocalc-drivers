@@ -12,7 +12,7 @@
 #include <linux/platform_device.h>
 #include <linux/regmap.h>
 #include <linux/of.h>
-
+#include <linux/stddef.h>
 
 #include "picocalc_kbd_code.h"
 
@@ -45,7 +45,7 @@ enum pico_key_state
     KEY_STATE_PRESSED = 1,
     KEY_STATE_HOLD = 2,
     KEY_STATE_RELEASED = 3,
-    KEY_STATE_LONG_HOLD = 4,
+    KEY_STATE_LONG_HOLD = 4, //Unused
 };
 struct key_fifo_item
 {
@@ -78,6 +78,39 @@ struct kbd_ctx
 
     int mouse_mode;
     uint8_t mouse_move_dir;
+    bool left_shift_pressed;   // Shift status L
+    bool right_shift_pressed;  // Shift status R
+    bool F6_pressed;
+    bool F7_pressed;
+    bool F8_pressed;
+    bool F9_pressed;
+    bool F10_pressed;
+    bool Brk_pressed;
+    bool Home_pressed;
+    bool End_pressed;
+    bool PageUp_pressed;
+    bool PageDown_pressed;
+    bool Ins_pressed;
+};
+
+// Mapping of 2nd key scancodes to their corresponding kbd_ctx boolean offsets
+struct second_key_maps_item {
+    unsigned int scancode;
+    size_t offset;
+};
+// This is a static, compile-time constant array that does not contain any runtime addresses
+static const struct second_key_maps_item second_key_maps[] = {
+    {0x86, offsetof(struct kbd_ctx, F6_pressed)},
+    {0x87, offsetof(struct kbd_ctx, F7_pressed)},
+    {0x88, offsetof(struct kbd_ctx, F8_pressed)},
+    {0x89, offsetof(struct kbd_ctx, F9_pressed)},
+    {0x90, offsetof(struct kbd_ctx, F10_pressed)},
+    {0xD0, offsetof(struct kbd_ctx, Brk_pressed)},
+    {0xD2, offsetof(struct kbd_ctx, Home_pressed)},
+    {0xD5, offsetof(struct kbd_ctx, End_pressed)},
+    {0xD6, offsetof(struct kbd_ctx, PageUp_pressed)},
+    {0xD7, offsetof(struct kbd_ctx, PageDown_pressed)},
+    {0xD8, offsetof(struct kbd_ctx, Ins_pressed)},
 };
 
 // Parse 0 to 255 from string
@@ -213,103 +246,130 @@ static void key_report_event(struct kbd_ctx* ctx,
         return;
     }
 
-        /* right shift */
-        if (ev->scancode == 0xA3)
-        {
-            if (ev->state == KEY_STATE_PRESSED)
-            {
-                ctx->mouse_mode = !ctx->mouse_mode;
-            }
-            return;
-        }
-
-        if (ctx->mouse_mode)
-        {
-            switch(ev->scancode)
-            {
-            /* KEY_BACKSPACE */
-/*
-            case '\b':
-                  if (ev->state == KEY_STATE_PRESSED)
-                  {
-                      input_report_abs(ctx->input_dev, ABS_X, 0);
-                      input_report_abs(ctx->input_dev, ABS_Y, 0);
-                  }
-                  return;
-*/
-            /* KEY_RIGHT */
-            case 0xb7:
-                  if (ev->state == KEY_STATE_PRESSED)
-                  {
-                      if (!(ctx->mouse_move_dir & MOUSE_MOVE_RIGHT))
-                      ctx->last_keypress_at = ktime_get_boottime_ns();
-                      ctx->mouse_move_dir |= MOUSE_MOVE_RIGHT;
-                  }
-                  else if (ev->state == KEY_STATE_RELEASED)
-                  {
-                      ctx->mouse_move_dir &= ~MOUSE_MOVE_RIGHT;
-                  }
-                  return;
-            /* KEY_LEFT */
-            case 0xb4:
-                  if (ev->state == KEY_STATE_PRESSED)
-                  {
-                      if (!(ctx->mouse_move_dir & MOUSE_MOVE_LEFT))
-                      ctx->last_keypress_at = ktime_get_boottime_ns();
-                      ctx->mouse_move_dir |= MOUSE_MOVE_LEFT;
-                  }
-                  else if (ev->state == KEY_STATE_RELEASED)
-                  {
-                  ctx->last_keypress_at = ktime_get_boottime_ns();
-                      ctx->mouse_move_dir &= ~MOUSE_MOVE_LEFT;
-                  }
-                  return;
-            /* KEY_DOWN */
-            case 0xb6:
-                  if (ev->state == KEY_STATE_PRESSED)
-                  {
-                      if (!(ctx->mouse_move_dir & MOUSE_MOVE_DOWN))
-                      ctx->last_keypress_at = ktime_get_boottime_ns();
-                      ctx->mouse_move_dir |= MOUSE_MOVE_DOWN;
-                  }
-                  else if (ev->state == KEY_STATE_RELEASED)
-                  {
-                      ctx->mouse_move_dir &= ~MOUSE_MOVE_DOWN;
-                  }
-                  return;
-            /* KEY_UP */
-            case 0xb5:
-                  if (ev->state == KEY_STATE_PRESSED)
-                  {
-                      if (!(ctx->mouse_move_dir & MOUSE_MOVE_UP))
-                      ctx->last_keypress_at = ktime_get_boottime_ns();
-                      ctx->mouse_move_dir |= MOUSE_MOVE_UP;
-                  }
-                  else if (ev->state == KEY_STATE_RELEASED)
-                  {
-                      ctx->mouse_move_dir &= ~MOUSE_MOVE_UP;
-                  }
-                  return;
-            /* KEY_RIGHTBRACE */
-            case ']':
-              input_report_key(ctx->input_dev, BTN_LEFT, ev->state == KEY_STATE_PRESSED);
-                  return;
-            /* KEY_LEFTBRACE */
-            case '[':
-              input_report_key(ctx->input_dev, BTN_RIGHT, ev->state == KEY_STATE_PRESSED);
-                  return;
-            default:
-                     break;
-            }
-        }
-
     // Post key scan event
-    input_event(ctx->input_dev, EV_MSC, MSC_SCAN, ev->scancode);
+//     input_event(ctx->input_dev, EV_MSC, MSC_SCAN, ev->scancode);
+
+    // Track the physical pressed state of left and right shift
+    bool is_held_or_pressed = (ev->state == KEY_STATE_PRESSED || ev->state == KEY_STATE_HOLD);
+
+    if (ev->scancode == 0xA2) { // L_Shift
+        ctx->left_shift_pressed = is_held_or_pressed;
+    }
+    if (ev->scancode == 0xA3) { // R_shift
+        ctx->right_shift_pressed = is_held_or_pressed;
+    }
+
+
+/*
+Special logic for Shift:
+1. Used to toggle mouse mode,
+2. Handle the case where Shift is released first in Shift + combination keys
+
+*/
+    if ((ev->state == KEY_STATE_PRESSED) && (ev->scancode == 0xA2 || ev->scancode == 0xA3)) {
+        if (ctx->left_shift_pressed && ctx->right_shift_pressed) {
+            ctx->mouse_mode = !ctx->mouse_mode;
+            // Press both Shifts simultaneously to toggle mouse mode
+        }
+    } else if ((ev->state == KEY_STATE_RELEASED) && (ev->scancode == 0xA2 || ev->scancode == 0xA3)){
+        if (!ctx->left_shift_pressed && !ctx->right_shift_pressed) {
+            // When any Shift is released, if the tracked combination keys are not released, manually release them
+            for (int i = 0; i < ARRAY_SIZE(second_key_maps); i++) {
+                bool *is_pressed = (bool *)((char *)ctx + second_key_maps[i].offset);
+                if (*is_pressed) {
+                    *is_pressed = false;
+                    uint8_t keycode = keycodes[second_key_maps[i].scancode];
+                    input_report_key(ctx->input_dev, keycode, false);
+                }
+            }
+        }
+    }
+
+    // Mouse mode
+    if (ctx->mouse_mode){
+        switch(ev->scancode){
+        /* KEY_RIGHT */
+        case 0xb7:
+                if (ev->state == KEY_STATE_PRESSED)
+                {
+                    if (!(ctx->mouse_move_dir & MOUSE_MOVE_RIGHT))
+                    ctx->last_keypress_at = ktime_get_boottime_ns();
+                    ctx->mouse_move_dir |= MOUSE_MOVE_RIGHT;
+                }
+                else if (ev->state == KEY_STATE_RELEASED)
+                {
+                    ctx->mouse_move_dir &= ~MOUSE_MOVE_RIGHT;
+                }
+                return;
+        /* KEY_LEFT */
+        case 0xb4:
+                if (ev->state == KEY_STATE_PRESSED)
+                {
+                    if (!(ctx->mouse_move_dir & MOUSE_MOVE_LEFT))
+                    ctx->last_keypress_at = ktime_get_boottime_ns();
+                    ctx->mouse_move_dir |= MOUSE_MOVE_LEFT;
+                }
+                else if (ev->state == KEY_STATE_RELEASED)
+                {
+                ctx->last_keypress_at = ktime_get_boottime_ns();
+                    ctx->mouse_move_dir &= ~MOUSE_MOVE_LEFT;
+                }
+                return;
+        /* KEY_DOWN */
+        case 0xb6:
+                if (ev->state == KEY_STATE_PRESSED)
+                {
+                    if (!(ctx->mouse_move_dir & MOUSE_MOVE_DOWN))
+                    ctx->last_keypress_at = ktime_get_boottime_ns();
+                    ctx->mouse_move_dir |= MOUSE_MOVE_DOWN;
+                }
+                else if (ev->state == KEY_STATE_RELEASED)
+                {
+                    ctx->mouse_move_dir &= ~MOUSE_MOVE_DOWN;
+                }
+                return;
+        /* KEY_UP */
+        case 0xb5:
+                if (ev->state == KEY_STATE_PRESSED)
+                {
+                    if (!(ctx->mouse_move_dir & MOUSE_MOVE_UP))
+                    ctx->last_keypress_at = ktime_get_boottime_ns();
+                    ctx->mouse_move_dir |= MOUSE_MOVE_UP;
+                }
+                else if (ev->state == KEY_STATE_RELEASED)
+                {
+                    ctx->mouse_move_dir &= ~MOUSE_MOVE_UP;
+                }
+                return;
+        /* KEY_RIGHTBRACE */
+        case ']':
+            input_report_key(ctx->input_dev, BTN_RIGHT, ev->state == KEY_STATE_PRESSED);
+                return;
+        /* KEY_LEFTBRACE */
+        case '[':
+            input_report_key(ctx->input_dev, BTN_LEFT, ev->state == KEY_STATE_PRESSED);
+                return;
+        /* KEY_MINUS = page up*/
+        case 0x84:
+        case 0x89:
+            input_report_key(ctx->input_dev, KEY_PAGEUP, ev->state == KEY_STATE_PRESSED);
+                return;
+        /* KEY_PLUS = page down*/
+        case 0x85:
+        case 0x90:
+            input_report_key(ctx->input_dev, KEY_PAGEDOWN, ev->state == KEY_STATE_PRESSED);
+                return;
+        default:
+                break;
+        }
+    }
+
 
     // Map input scancode to Linux input keycode
     keycode = keycodes[ev->scancode];
 
-    dev_info_fe(&ctx->i2c_client->dev,
+    //keycode = ev->scancode;
+    dev_info_fe(&ctx->input_dev->dev,
         "%s state %d, scancode %d mapped to keycode %d\n",
         __func__, ev->state, ev->scancode, keycode);
     //printk("state %d, scancode %d mapped to keycode %d\n",
@@ -321,7 +381,7 @@ static void key_report_event(struct kbd_ctx* ctx,
 
     // Scancode converted to keycode not in map
     } else if (keycode == KEY_UNKNOWN) {
-        dev_warn(&ctx->i2c_client->dev,
+        dev_warn(&ctx->input_dev->dev,
             "%s Could not get Keycode for Scancode: [0x%02X]\n",
             __func__, ev->scancode);
         return;
@@ -367,15 +427,37 @@ static void key_report_event(struct kbd_ctx* ctx,
     }
 
 /*
-    // Apply pending sticky modifiers
-    keycode = input_modifiers_apply_pending(ctx, keycode);
+Handle the issue where when pressing esc - brk combination keys to trigger 2nd_key(brk), the shift is not released, causing the actual trigger of shift+2nd_key;
+And if shift is released first, the firmware reports 1st_key "release" causing key confusion;
 */
+    //Shift + Enter will be reported as 0xd1 Insert, so in the keymap, 0xd1 is also mapped to Enter, first handle the case of pressing Insert alone,
+    if (ev->scancode == 0xd1 && !ctx->left_shift_pressed && !ctx->right_shift_pressed) {
+        input_report_key(ctx->input_dev, KEY_INSERT, ev->state == KEY_STATE_PRESSED);
+        return;
+    }
+    // Track the press state of 2nd keys, iterate through the processing list
+    for (int i = 0; i < ARRAY_SIZE(second_key_maps); i++) {
+        if (ev->scancode == second_key_maps[i].scancode) {
+
+            bool *is_pressed = (bool *)((char *)ctx + second_key_maps[i].offset);
+
+            *is_pressed = (ev->state == KEY_STATE_PRESSED);
+
+            if(ev->state  == KEY_STATE_PRESSED){
+                input_report_key(ctx->input_dev, KEY_LEFTSHIFT, FALSE);
+                input_report_key(ctx->input_dev, KEY_RIGHTSHIFT, FALSE);
+            }
+
+            input_report_key(ctx->input_dev, keycode, ev->state == KEY_STATE_PRESSED);
+            return;
+        }
+    }
 
     // Report key to input system
     input_report_key(ctx->input_dev, keycode, ev->state == KEY_STATE_PRESSED);
 
     // Reset sticky modifiers
-    // input_modifiers_reset(ctx);
+//     input_modifiers_reset(ctx);
 }
 
 static void input_workqueue_handler(struct work_struct *work_struct_ptr)
@@ -511,6 +593,20 @@ int input_probe(struct i2c_client* i2c_client, struct regmap* regmap)
 
     // Request IRQ handler for I2C client and initialize workqueue
     /*
+        g_ctx->left_shift_pressed = false;  // Initialize the state of both shifts
+        g_ctx->right_shift_pressed = false; // Initialize the state of both shifts
+        g_ctx->F6_pressed = false;
+        g_ctx->F7_pressed = false;
+        g_ctx->F8_pressed = false;
+        g_ctx->F9_pressed = false;
+        g_ctx->F10_pressed = false;
+        g_ctx->Brk_pressed = false;
+        g_ctx->Home_pressed = false;
+        g_ctx->End_pressed = false;
+        g_ctx->PageUp_pressed = false;
+        g_ctx->PageDown_pressed = false;
+        g_ctx->Ins_pressed = false;
+        //
     if ((rc = devm_request_threaded_irq(&i2c_client->dev,
         i2c_client->irq, NULL, input_irq_handler, IRQF_SHARED | IRQF_ONESHOT,
         i2c_client->name, g_ctx))) {
@@ -522,6 +618,7 @@ int input_probe(struct i2c_client* i2c_client, struct regmap* regmap)
     */
     g_ctx->mouse_mode = FALSE;
     g_ctx->mouse_move_dir = 0;
+
     INIT_WORK(&g_ctx->work_struct, input_workqueue_handler);
     g_kbd_timer.expires = jiffies + HZ / 128;
     add_timer(&g_kbd_timer);
@@ -600,4 +697,4 @@ module_platform_driver(picocalc_mfd_kbd_driver);
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("hiro <hiro@hiro.com>");
 MODULE_DESCRIPTION("keyboard driver for picocalc");
-MODULE_VERSION("0.01");
+MODULE_VERSION("0.02");

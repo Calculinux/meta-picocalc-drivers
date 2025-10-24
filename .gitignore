@@ -1,0 +1,49 @@
+oe-logs
+oe-workdir
+
+# Kernel module build artifacts
+*.o
+*.ko
+*.mod
+*.mod.c
+*.mod.o
+*.cmd
+.tmp_versions/
+modules.order
+Module.symvers
+
+# Kernel build directories and files
+*.markers
+*.order
+.*.cmd
+.*.d
+.*.tmp
+*.unsigned
+
+# Editor backup files
+*~
+*.swp
+*.swo
+.#*
+\#*#
+
+# IDE/Editor directories
+.vscode/
+.idea/
+*.sublime-*
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+*.temp

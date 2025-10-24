@@ -10,12 +10,11 @@
 #include <linux/regmap.h>
 #include <linux/of.h>
 
-#include "../picocalc_mfd/picocalc_reg.h"
-
 struct picocalc_mfd_bms {
-    struct regmap *regmap;
-    struct power_supply *psy;
-    struct module *parent_module;
+	struct regmap *regmap;
+	struct power_supply *psy;
+	struct module *parent_module;
+	unsigned int reg;
 };
 
 static int picocalc_bms_get_property(struct power_supply *psy,
@@ -28,7 +27,7 @@ static int picocalc_bms_get_property(struct power_supply *psy,
 
     /* Read the battery status register when needed */
     if (psp == POWER_SUPPLY_PROP_STATUS || psp == POWER_SUPPLY_PROP_CAPACITY) {
-        ret = regmap_bulk_read(bat->regmap, REG_ID_BAT, buf, 2);
+        ret = regmap_bulk_read(bat->regmap, bat->reg, buf, 2);
         if (ret < 0)
             return ret;
     }
@@ -36,9 +35,9 @@ static int picocalc_bms_get_property(struct power_supply *psy,
     switch (psp) {
     case POWER_SUPPLY_PROP_STATUS:
         /* high bit indicates charging */
-        if (buf[1] & MSB_MASK)
+        if (buf[1] & (1 << 7))
             val->intval = POWER_SUPPLY_STATUS_CHARGING;
-        else if ((buf[1] & ~MSB_MASK) == 100)
+        else if ((buf[1] & ~(1 << 7)) == 100)
             val->intval = POWER_SUPPLY_STATUS_FULL;
         else
             val->intval = POWER_SUPPLY_STATUS_DISCHARGING;
@@ -77,34 +76,42 @@ static const struct power_supply_desc picocalc_bms_desc = {
 
 static int picocalc_mfd_bms_probe(struct platform_device *pdev)
 {
-    struct device *dev = &pdev->dev;
-    struct picocalc_mfd_bms *bat;
-    struct power_supply_config psy_cfg = {};
+	struct device *dev = &pdev->dev;
+	struct picocalc_mfd_bms *bat;
+	struct power_supply_config psy_cfg = {};
 
-    bat = devm_kzalloc(dev, sizeof(*bat), GFP_KERNEL);
-    if (!bat)
-        return -ENOMEM;
+	bat = devm_kzalloc(dev, sizeof(*bat), GFP_KERNEL);
+	if (!bat)
+		return -ENOMEM;
 
-    bat->regmap = dev_get_regmap(dev->parent, NULL);
-    if (!bat->regmap) {
-        dev_err(dev, "Failed to get parent regmap\n");
+    u32 reg_addr;
+    if (of_property_read_u32(pdev->dev.of_node, "reg", &reg_addr)) {
+        dev_err(&pdev->dev, "Failed to get reg property\n");
         return -EINVAL;
     }
+    bat->reg = reg_addr;
 
-    psy_cfg.drv_data = bat;
-    bat->psy = devm_power_supply_register(dev, &picocalc_bms_desc, &psy_cfg);
-    if (IS_ERR(bat->psy)) {
-        dev_err(dev, "Failed to register power supply\n");
-        return PTR_ERR(bat->psy);
-    }
+	bat->regmap = dev_get_regmap(dev->parent, NULL);
+	if (!bat->regmap) {
+		dev_err(dev, "Failed to get parent regmap\n");
+		return -EINVAL;
+	}
 
-    platform_set_drvdata(pdev, bat);
+	psy_cfg.drv_data = bat;
+	bat->psy = devm_power_supply_register(dev, &picocalc_bms_desc, &psy_cfg);
+	if (IS_ERR(bat->psy)) {
+		dev_err(dev, "Failed to register power supply\n");
+		return PTR_ERR(bat->psy);
+	}
 
-    return 0;
+	platform_set_drvdata(pdev, bat);
+
+	dev_info(dev, "Battery monitoring system registered successfully\n");
+	return 0;
 }
 
 static const struct of_device_id picocalc_mfd_bms_of_match[] = {
-    { .compatible = "picocalc_mfd_bms", },
+    { .compatible = "picocalc-mfd-bms", },
     {}
 };
 MODULE_DEVICE_TABLE(of, picocalc_mfd_bms_of_match);

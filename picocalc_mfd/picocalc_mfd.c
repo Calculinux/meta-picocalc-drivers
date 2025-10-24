@@ -16,8 +16,13 @@
 #include <linux/module.h>
 #include <linux/of_platform.h>
 #include <linux/regmap.h>
+#include <linux/reboot.h>
 
 #include "picocalc_reg.h"
+
+struct picocalc_mfd_data {
+	u32 poweroff_reg;
+};
 
 /* This regmap config assumes 8-bit register addresses and 8-bit values */
 static const struct regmap_config picocalc_mfd_regmap_config = {
@@ -68,6 +73,20 @@ static int picocalc_mfd_probe(struct i2c_client *i2c, const struct i2c_device_id
     struct regmap *regmap;
     unsigned int fw_type, fw_version;
     int ret;
+    struct picocalc_mfd_data *data;
+
+    data = devm_kzalloc(&i2c->dev, sizeof(struct picocalc_mfd_data), GFP_KERNEL);
+    if (!data) {
+        return -ENOMEM;
+    }
+
+    i2c_set_clientdata(i2c, data);
+
+    ret = device_property_read_u32(&i2c->dev, "poweroff", &data->poweroff_reg);
+    if (ret) {
+        dev_err(&i2c->dev, "Failed to read 'poweroff' property\n");
+        return ret;
+    }
 
     /* Initialize the regmap for the I2C device */
     regmap = devm_regmap_init_i2c(i2c, &picocalc_mfd_regmap_config);
@@ -107,9 +126,26 @@ static void picocalc_mfd_remove(struct i2c_client *i2c)
     sysfs_remove_group(&i2c->dev.kobj, &picocalc_mfd_attr_group);
 }
 
+static void picocalc_mfd_shutdown(struct i2c_client *i2c)
+{
+    struct picocalc_mfd_data *data = i2c_get_clientdata(i2c);
+    struct regmap *regmap = dev_get_regmap(&i2c->dev, NULL);
+
+    if (system_state == SYSTEM_RESTART)
+        return;
+
+    if (!regmap) {
+        dev_err(&i2c->dev, "Failed to get regmap for shutdown\n");
+        return;
+    }
+
+    dev_info(&i2c->dev, "Power Off\n");
+    regmap_write(regmap, data->poweroff_reg | (1<<7), 1);
+}
+
 static const struct of_device_id picocalc_mfd_of_match[] = {
-    { .compatible = "picocalc_mfd", },
-    { /* sentinel */ }
+    { .compatible = "picocalc-mfd", },
+    {}
 };
 MODULE_DEVICE_TABLE(of, picocalc_mfd_of_match);
 
@@ -120,6 +156,7 @@ static struct i2c_driver picocalc_mfd_driver = {
     },
     .probe = picocalc_mfd_probe,
     .remove = picocalc_mfd_remove,
+    .shutdown = picocalc_mfd_shutdown,
 };
 module_i2c_driver(picocalc_mfd_driver);
 
