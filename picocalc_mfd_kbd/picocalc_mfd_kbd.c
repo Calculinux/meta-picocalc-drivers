@@ -76,7 +76,7 @@ struct kbd_ctx
     struct key_fifo_item key_fifo_data[KBD_FIFO_SIZE];
     uint64_t last_keypress_at;
 
-    int mouse_mode;
+    bool mouse_mode;
     uint8_t mouse_move_dir;
     bool left_shift_pressed;   // Shift status L
     bool right_shift_pressed;  // Shift status R
@@ -268,8 +268,18 @@ Special logic for Shift:
 */
     if ((ev->state == KEY_STATE_PRESSED) && (ev->scancode == 0xA2 || ev->scancode == 0xA3)) {
         if (ctx->left_shift_pressed && ctx->right_shift_pressed) {
+            // Toggle mouse mode
             ctx->mouse_mode = !ctx->mouse_mode;
+            dev_info(&ctx->input_dev->dev,
+                "MOUSE_MODE: toggled to %s (move_dir was 0x%02x)\n",
+                ctx->mouse_mode ? "ENABLED" : "DISABLED", ctx->mouse_move_dir);
             // Press both Shifts simultaneously to toggle mouse mode
+            // Clear any residual mouse movement flags when disabling mouse mode
+            if (!ctx->mouse_mode) {
+                ctx->mouse_move_dir = 0;
+                dev_info(&ctx->input_dev->dev,
+                    "MOUSE_MODE: cleared move_dir to 0x%02x\n", ctx->mouse_move_dir);
+            }
         }
     } else if ((ev->state == KEY_STATE_RELEASED) && (ev->scancode == 0xA2 || ev->scancode == 0xA3)){
         if (!ctx->left_shift_pressed && !ctx->right_shift_pressed) {
@@ -285,62 +295,118 @@ Special logic for Shift:
         }
     }
 
-    // Mouse mode
+    // Handle arrow key direction flags
+    // CRITICAL: Must clear flags on RELEASE regardless of mouse_mode state
+    // to handle the case where mouse mode is toggled off while keys are held
+    switch(ev->scancode){
+    /* KEY_RIGHT */
+    case 0xb7:
+        if (ev->state == KEY_STATE_RELEASED) {
+            dev_info(&ctx->input_dev->dev,
+                "ARROW: RIGHT released, clearing flag (dir was 0x%02x, mouse_mode=%d)\n",
+                ctx->mouse_move_dir, ctx->mouse_mode);
+            ctx->mouse_move_dir &= ~MOUSE_MOVE_RIGHT;
+            dev_info(&ctx->input_dev->dev,
+                "ARROW: RIGHT dir after clear: 0x%02x\n",
+                ctx->mouse_move_dir);
+        } else if (ctx->mouse_mode && ev->state == KEY_STATE_PRESSED) {
+            if (!(ctx->mouse_move_dir & MOUSE_MOVE_RIGHT))
+                ctx->last_keypress_at = ktime_get_boottime_ns();
+            ctx->mouse_move_dir |= MOUSE_MOVE_RIGHT;
+            dev_info(&ctx->input_dev->dev,
+                "ARROW: RIGHT pressed, setting flag (dir now 0x%02x)\n",
+                ctx->mouse_move_dir);
+        } else if (ev->state == KEY_STATE_PRESSED || ev->state == KEY_STATE_HOLD) {
+            // This should NOT happen - flag set when mouse_mode is FALSE
+            dev_warn(&ctx->input_dev->dev,
+                "ARROW: RIGHT pressed/hold while mouse_mode=%d, state=%d (NOT setting flag, dir=0x%02x)\n",
+                ctx->mouse_mode, ev->state, ctx->mouse_move_dir);
+        }
+        if (ctx->mouse_mode)
+            return;
+        break;
+    /* KEY_LEFT */
+    case 0xb4:
+        if (ev->state == KEY_STATE_RELEASED) {
+            dev_info(&ctx->input_dev->dev,
+                "ARROW: LEFT released, clearing flag (dir was 0x%02x, mouse_mode=%d)\n",
+                ctx->mouse_move_dir, ctx->mouse_mode);
+            ctx->mouse_move_dir &= ~MOUSE_MOVE_LEFT;
+            dev_info(&ctx->input_dev->dev,
+                "ARROW: LEFT dir after clear: 0x%02x\n",
+                ctx->mouse_move_dir);
+        } else if (ctx->mouse_mode && ev->state == KEY_STATE_PRESSED) {
+            if (!(ctx->mouse_move_dir & MOUSE_MOVE_LEFT))
+                ctx->last_keypress_at = ktime_get_boottime_ns();
+            ctx->mouse_move_dir |= MOUSE_MOVE_LEFT;
+            dev_info(&ctx->input_dev->dev,
+                "ARROW: LEFT pressed, setting flag (dir now 0x%02x)\n",
+                ctx->mouse_move_dir);
+        } else if (ev->state == KEY_STATE_PRESSED || ev->state == KEY_STATE_HOLD) {
+            dev_warn(&ctx->input_dev->dev,
+                "ARROW: LEFT pressed/hold while mouse_mode=%d, state=%d (NOT setting flag, dir=0x%02x)\n",
+                ctx->mouse_mode, ev->state, ctx->mouse_move_dir);
+        }
+        if (ctx->mouse_mode)
+            return;
+        break;
+    /* KEY_DOWN */
+    case 0xb6:
+        if (ev->state == KEY_STATE_RELEASED) {
+            dev_info(&ctx->input_dev->dev,
+                "ARROW: DOWN released, clearing flag (dir was 0x%02x, mouse_mode=%d)\n",
+                ctx->mouse_move_dir, ctx->mouse_mode);
+            ctx->mouse_move_dir &= ~MOUSE_MOVE_DOWN;
+            dev_info(&ctx->input_dev->dev,
+                "ARROW: DOWN dir after clear: 0x%02x\n",
+                ctx->mouse_move_dir);
+        } else if (ctx->mouse_mode && ev->state == KEY_STATE_PRESSED) {
+            if (!(ctx->mouse_move_dir & MOUSE_MOVE_DOWN))
+                ctx->last_keypress_at = ktime_get_boottime_ns();
+            ctx->mouse_move_dir |= MOUSE_MOVE_DOWN;
+            dev_info(&ctx->input_dev->dev,
+                "ARROW: DOWN pressed, setting flag (dir now 0x%02x)\n",
+                ctx->mouse_move_dir);
+        } else if (ev->state == KEY_STATE_PRESSED || ev->state == KEY_STATE_HOLD) {
+            dev_warn(&ctx->input_dev->dev,
+                "ARROW: DOWN pressed/hold while mouse_mode=%d, state=%d (NOT setting flag, dir=0x%02x)\n",
+                ctx->mouse_mode, ev->state, ctx->mouse_move_dir);
+        }
+        if (ctx->mouse_mode)
+            return;
+        break;
+    /* KEY_UP */
+    case 0xb5:
+        if (ev->state == KEY_STATE_RELEASED) {
+            dev_info(&ctx->input_dev->dev,
+                "ARROW: UP released, clearing flag (dir was 0x%02x, mouse_mode=%d)\n",
+                ctx->mouse_move_dir, ctx->mouse_mode);
+            ctx->mouse_move_dir &= ~MOUSE_MOVE_UP;
+            dev_info(&ctx->input_dev->dev,
+                "ARROW: UP dir after clear: 0x%02x\n",
+                ctx->mouse_move_dir);
+        } else if (ctx->mouse_mode && ev->state == KEY_STATE_PRESSED) {
+            if (!(ctx->mouse_move_dir & MOUSE_MOVE_UP))
+                ctx->last_keypress_at = ktime_get_boottime_ns();
+            ctx->mouse_move_dir |= MOUSE_MOVE_UP;
+            dev_info(&ctx->input_dev->dev,
+                "ARROW: UP pressed, setting flag (dir now 0x%02x)\n",
+                ctx->mouse_move_dir);
+        } else if (ev->state == KEY_STATE_PRESSED || ev->state == KEY_STATE_HOLD) {
+            dev_warn(&ctx->input_dev->dev,
+                "ARROW: UP pressed/hold while mouse_mode=%d, state=%d (NOT setting flag, dir=0x%02x)\n",
+                ctx->mouse_mode, ev->state, ctx->mouse_move_dir);
+        }
+        if (ctx->mouse_mode)
+            return;
+        break;
+    default:
+        break;
+    }
+
+    // Mouse mode - handle mouse buttons and other functions
     if (ctx->mouse_mode){
         switch(ev->scancode){
-        /* KEY_RIGHT */
-        case 0xb7:
-                if (ev->state == KEY_STATE_PRESSED)
-                {
-                    if (!(ctx->mouse_move_dir & MOUSE_MOVE_RIGHT))
-                    ctx->last_keypress_at = ktime_get_boottime_ns();
-                    ctx->mouse_move_dir |= MOUSE_MOVE_RIGHT;
-                }
-                else if (ev->state == KEY_STATE_RELEASED)
-                {
-                    ctx->mouse_move_dir &= ~MOUSE_MOVE_RIGHT;
-                }
-                return;
-        /* KEY_LEFT */
-        case 0xb4:
-                if (ev->state == KEY_STATE_PRESSED)
-                {
-                    if (!(ctx->mouse_move_dir & MOUSE_MOVE_LEFT))
-                    ctx->last_keypress_at = ktime_get_boottime_ns();
-                    ctx->mouse_move_dir |= MOUSE_MOVE_LEFT;
-                }
-                else if (ev->state == KEY_STATE_RELEASED)
-                {
-                ctx->last_keypress_at = ktime_get_boottime_ns();
-                    ctx->mouse_move_dir &= ~MOUSE_MOVE_LEFT;
-                }
-                return;
-        /* KEY_DOWN */
-        case 0xb6:
-                if (ev->state == KEY_STATE_PRESSED)
-                {
-                    if (!(ctx->mouse_move_dir & MOUSE_MOVE_DOWN))
-                    ctx->last_keypress_at = ktime_get_boottime_ns();
-                    ctx->mouse_move_dir |= MOUSE_MOVE_DOWN;
-                }
-                else if (ev->state == KEY_STATE_RELEASED)
-                {
-                    ctx->mouse_move_dir &= ~MOUSE_MOVE_DOWN;
-                }
-                return;
-        /* KEY_UP */
-        case 0xb5:
-                if (ev->state == KEY_STATE_PRESSED)
-                {
-                    if (!(ctx->mouse_move_dir & MOUSE_MOVE_UP))
-                    ctx->last_keypress_at = ktime_get_boottime_ns();
-                    ctx->mouse_move_dir |= MOUSE_MOVE_UP;
-                }
-                else if (ev->state == KEY_STATE_RELEASED)
-                {
-                    ctx->mouse_move_dir &= ~MOUSE_MOVE_UP;
-                }
-                return;
         /* KEY_RIGHTBRACE */
         case ']':
             input_report_key(ctx->input_dev, BTN_RIGHT, ev->state == KEY_STATE_PRESSED);
@@ -454,6 +520,9 @@ And if shift is released first, the firmware reports 1st_key "release" causing k
     }
 
     // Report key to input system
+    dev_info(&ctx->input_dev->dev,
+        "KEY_REPORT: scancode=0x%02x keycode=%d state=%d (mouse_mode=%d, move_dir=0x%02x)\n",
+        ev->scancode, keycode, ev->state, ctx->mouse_mode, ctx->mouse_move_dir);
     input_report_key(ctx->input_dev, keycode, ev->state == KEY_STATE_PRESSED);
 
     // Reset sticky modifiers
@@ -474,6 +543,13 @@ static void input_workqueue_handler(struct work_struct *work_struct_ptr)
         key_report_event(ctx, &ctx->key_fifo_data[fifo_idx]);
     }
 
+    // Debug: log state before checking mouse_mode
+    if (ctx->mouse_move_dir != 0) {
+        dev_info(&ctx->input_dev->dev,
+            "WORKQUEUE: mouse_move_dir=0x%02x mouse_mode=%d (will%s report movement)\n",
+            ctx->mouse_move_dir, ctx->mouse_mode, ctx->mouse_mode ? "" : " NOT");
+    }
+
     if (ctx->mouse_mode)
         {
             uint64_t press_time = ktime_get_boottime_ns() - ctx->last_keypress_at;
@@ -492,18 +568,30 @@ static void input_workqueue_handler(struct work_struct *work_struct_ptr)
 
             if (ctx->mouse_move_dir & MOUSE_MOVE_LEFT)
             {
+                dev_info(&ctx->input_dev->dev,
+                    "MOVE: Reporting LEFT movement (step=%d, dir=0x%02x)\n",
+                    mouse_move_step, ctx->mouse_move_dir);
                 input_report_rel(ctx->input_dev, REL_X, -mouse_move_step);
             }
             if (ctx->mouse_move_dir & MOUSE_MOVE_RIGHT)
             {
+                dev_info(&ctx->input_dev->dev,
+                    "MOVE: Reporting RIGHT movement (step=%d, dir=0x%02x)\n",
+                    mouse_move_step, ctx->mouse_move_dir);
                 input_report_rel(ctx->input_dev, REL_X, mouse_move_step);
             }
             if (ctx->mouse_move_dir & MOUSE_MOVE_DOWN)
             {
+                dev_info(&ctx->input_dev->dev,
+                    "MOVE: Reporting DOWN movement (step=%d, dir=0x%02x)\n",
+                    mouse_move_step, ctx->mouse_move_dir);
                 input_report_rel(ctx->input_dev, REL_Y, mouse_move_step);
             }
             if (ctx->mouse_move_dir & MOUSE_MOVE_UP)
             {
+                dev_info(&ctx->input_dev->dev,
+                    "MOVE: Reporting UP movement (step=%d, dir=0x%02x)\n",
+                    mouse_move_step, ctx->mouse_move_dir);
                 input_report_rel(ctx->input_dev, REL_Y, -mouse_move_step);
             }
         }
@@ -616,7 +704,7 @@ int input_probe(struct i2c_client* i2c_client, struct regmap* regmap)
         return rc;
     }
     */
-    g_ctx->mouse_mode = FALSE;
+    g_ctx->mouse_mode = false;
     g_ctx->mouse_move_dir = 0;
 
     INIT_WORK(&g_ctx->work_struct, input_workqueue_handler);
