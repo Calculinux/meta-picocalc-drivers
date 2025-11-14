@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+config PICOCALC_LCD_DRM
+	tristate "PicoCalc TinyDRM LCD driver"
+	depends on DRM && DRM_MIPI_DBI && SPI
+	select DRM_KMS_HELPER
+	select DRM_GEM_DMA_HELPER
+	help
+	  Enable the TinyDRM-based driver for the PicoCalc ILI9488 SPI
+	  panel. This provides a DRM/KMS interface (via mipi-dbi) so
+	  userspace can use the kmsdrm backend instead of the legacy
+	  framebuffer driver.

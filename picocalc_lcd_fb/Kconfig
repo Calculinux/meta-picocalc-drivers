@@ -1,0 +1,6 @@
+# SPDX-License-Identifier: GPL-2.0
+config PICOCALC_LCD_FB
+    tristate "Picocalc screen support (fbdev)"
+    help
+
+      Say Y or M here if you want to use the picocalc lcd screen with a framebuffer only driver. The module will be called ili9488_fb.
