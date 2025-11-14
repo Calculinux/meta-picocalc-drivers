@@ -65,7 +65,7 @@ struct ili9488_par {
 
     struct device           *dev;
     struct spi_device       *spi;
-    struct spi_transfer *spi_3_xfers;
+    struct spi_transfer     *spi_3_xfers;
 
     u8                      *buf;
     struct {
@@ -268,8 +268,6 @@ static int ili9488_clear(struct ili9488_par *priv)
     u32 clear = 0x0;
     int x, y;
 
-    printk("clearing screen(%d x %d) ...\n", width, height);
-
     gpio_put(priv->gpio.cs, 0);
     ili9488_set_addr_win(priv, 0, 0, width, height);
 
@@ -343,8 +341,6 @@ static int ili9488_request_one_gpio(struct ili9488_par *par,
 static int ili9488_request_gpios(struct ili9488_par *par)
 {
     int rc;
-    pr_debug("%s, configure from dt\n", __func__);
-
     rc = ili9488_request_one_gpio(par, "rst", 0, &par->gpio.rst);
     if (rc)
         return rc;
@@ -375,7 +371,6 @@ static int ili9488_of_config(struct ili9488_par *par)
 {
     int rc;
 
-    printk("%s\n", __func__);
     rc = ili9488_request_gpios(par);
     if (rc) {
         dev_err(par->dev, "Request gpios failed!\n");
@@ -417,7 +412,6 @@ static int ili9488_of_config(struct ili9488_par *par)
 
 static int ili9488_hw_init(struct ili9488_par *par)
 {
-    printk("%s, Display Panel initializing ...\n", __func__);
     ili9488_init_display(par);
 
     // ili9488_set_var(par);
@@ -1004,7 +998,6 @@ static int ili9488_probe(struct spi_device *spi)
     int spi_tx_buf_size;
     int rc;
 
-    printk("%s\n", __func__);
     /* memory resource alloc */
     if (p_3bit_mode)
     {
@@ -1040,7 +1033,6 @@ static int ili9488_probe(struct spi_device *spi)
     }
 
     vmem_size = (width * height * bpp) / BITS_PER_BYTE;
-    printk("vmem_size : %d\n", vmem_size);
     vmem = vzalloc(vmem_size);
     if (!vmem)
         goto alloc_fail;
@@ -1171,6 +1163,7 @@ static int ili9488_probe(struct spi_device *spi)
     spin_lock_init(&par->dirty_lock);
     init_completion(&par->complete);
     ili9488_of_config(par);
+
     ili9488_hw_init(par);
 
     update_display(par, 0, par->fbinfo->var.yres - 1);
@@ -1181,11 +1174,13 @@ static int ili9488_probe(struct spi_device *spi)
         goto alloc_fail;
     }
 
+    /* Notify backlight that display is starting in unblank state */
     event.info = info;
-    fb_notifier_call_chain(0x0F, &event);
+    int blank = FB_BLANK_UNBLANK;
+    event.data = &blank;
+    fb_notifier_call_chain(FB_EVENT_BLANK, &event);
 
-    printk("%zu KB buffer memory\n", par->txbuf.len >> 10);
-    printk("%d KB video memory\n", info->fix.smem_len >> 10);
+    /* Buffer and video memory initialized */
 
     return 0;
 
@@ -1198,13 +1193,9 @@ static void ili9488_remove(struct spi_device *spi)
 {
     struct ili9488_par *par = spi_get_drvdata(spi);
 
-    printk("%s\n", __func__);
     fb_deferred_io_cleanup(par->fbinfo);
-
     unregister_framebuffer(par->fbinfo);
     framebuffer_release(par->fbinfo);
-
-    //par->tftops->clear(par);
 }
 
 static int __maybe_unused ili9488_runtime_suspend(struct device *dev)
