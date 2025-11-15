@@ -1,48 +1,51 @@
 // SPDX-License-Identifier: GPL-2.0+
 /*
- * DRM driver for Ilitek ILI9488 panels used in PicoCalc
+ * DRM driver for Ilitek ILI9488 panels
  *
- * Based on nekocharm's implementation for the Luckfox Lyra:
- * https://github.com/nekocharm/picocalc-luckfox-lyra
+ * Copyright 2025 nekocharm <jumba.jookiba@outlook.com>
+ *
+ * Some code copied from ili9486.c
+ * Copyright 2020 Kamlesh Gurudasani <kamlesh.gurudasani@gmail.com>
  */
 
-#include <linux/backlight.h>
-#include <linux/delay.h>
-#include <linux/gpio/consumer.h>
-#include <linux/module.h>
-#include <linux/property.h>
-#include <linux/spi/spi.h>
-
-#include <video/mipi_display.h>
-
-#include <drm/drm_atomic_helper.h>
-#include <drm/drm_damage_helper.h>
-#include <drm/drm_drv.h>
-#include <drm/drm_fb_helper.h>
-#include <drm/drm_format_helper.h>
-#include <drm/drm_gem_atomic_helper.h>
-#include <drm/drm_gem_dma_helper.h>
-#include <drm/drm_gem_framebuffer_helper.h>
-#include <drm/drm_managed.h>
-#include <drm/drm_mipi_dbi.h>
-#include <drm/drm_modeset_helper.h>
+ #include <linux/backlight.h>
+ #include <linux/delay.h>
+ #include <linux/gpio/consumer.h>
+ #include <linux/module.h>
+ #include <linux/property.h>
+ #include <linux/spi/spi.h>
+ 
+ #include <video/mipi_display.h>
+ 
+ #include <drm/drm_atomic_helper.h>
+ #include <drm/drm_damage_helper.h>
+ #include <drm/drm_drv.h>
+ #include <drm/drm_framebuffer.h>
+ #include <drm/drm_fb_helper.h>
+ #include <drm/drm_format_helper.h>
+ #include <drm/drm_gem_framebuffer_helper.h>
+ #include <drm/drm_gem_atomic_helper.h>
+ #include <drm/drm_gem_dma_helper.h>
+ #include <drm/drm_managed.h>
+ #include <drm/drm_mipi_dbi.h>
+ #include <drm/drm_modeset_helper.h>
 
 #define ILI9488_POSITIVE_GAMMA_CTRL		0xE0
 #define ILI9488_NEGATIVE_GAMMA_CTRL		0xE1
 #define ILI9488_POWER_CTRL_1			0xC0
 #define ILI9488_POWER_CTRL_2			0xC1
-#define ILI9488_VCOM_CTRL			0xC5
+#define ILI9488_VCOM_CTRL				0xC5
 #define ILI9488_MEMORY_ACCESS_CTRL		0x36
 #define ILI9488_PIXEL_INTERFACE_FORMAT	0x3A
 #define ILI9488_INTERFACE_MODE_CTRL		0xB0
-#define ILI9488_FRAME_RATE_CTRL		0xB1
-#define ILI9488_DISPLAY_INVERSION_ON		0x21
+#define ILI9488_FRAME_RATE_CTRL			0xB1
+#define ILI9488_DISPLAY_INVERSION_ON	0x21
 #define ILI9488_DISPLAY_INVERSION_CTRL	0xB4
 #define ILI9488_DISPLAY_FUNCTION_CTRL	0xB6
-#define ILI9488_ENTRY_MODE_SET		0xB7
+#define ILI9488_ENTRY_MODE_SET			0xB7
 #define ILI9488_ADJUST_CTRL_3			0xF7
-#define ILI9488_SLEEP_OUT			0x11
-#define ILI9488_DISPLAY_ON			0x29
+#define ILI9488_SLEEP_OUT				0x11
+#define ILI9488_DISPLAY_ON				0x29
 
 static int dummy_backlight_update_status(struct backlight_device *bd)
 {
@@ -54,8 +57,8 @@ static const struct backlight_ops dummy_backlight_ops = {
 };
 
 static void ili9488_enable(struct drm_simple_display_pipe *pipe,
-			      struct drm_crtc_state *crtc_state,
-			      struct drm_plane_state *plane_state)
+			     struct drm_crtc_state *crtc_state,
+			     struct drm_plane_state *plane_state)
 {
 	struct mipi_dbi_dev *dbidev = drm_to_mipi_dbi_dev(pipe->crtc.dev);
 	struct mipi_dbi *dbi = &dbidev->dbi;
@@ -64,18 +67,20 @@ static void ili9488_enable(struct drm_simple_display_pipe *pipe,
 	if (!drm_dev_enter(pipe->crtc.dev, &idx))
 		return;
 
+	DRM_DEBUG_KMS("\n");
+
 	ret = mipi_dbi_poweron_conditional_reset(dbidev);
 	if (ret < 0)
 		goto out_exit;
 
 	mipi_dbi_command(dbi, ILI9488_POSITIVE_GAMMA_CTRL,
-			 0x00, 0x03, 0x09, 0x08, 0x16, 0x0A,
-			 0x3F, 0x78, 0x4C, 0x09, 0x0A, 0x08,
-			 0x16, 0x1A, 0x0F);
+					 0x00, 0x03, 0x09, 0x08, 0x16, 0x0A,
+					 0x3F, 0x78, 0x4C, 0x09, 0x0A, 0x08, 
+					 0x16, 0x1A, 0x0F);
 	mipi_dbi_command(dbi, ILI9488_NEGATIVE_GAMMA_CTRL,
-			 0x00, 0x16, 0x19, 0x03, 0x0F, 0x05,
-			 0x32, 0x45, 0x46, 0x04, 0x0E, 0x0D,
-			 0x35, 0x37, 0x0F);
+					 0x00, 0x16, 0x19, 0x03, 0x0F, 0x05,
+					 0x32, 0x45, 0x46, 0x04, 0x0E, 0x0D,
+					 0x35, 0x37, 0x0F);
 	mipi_dbi_command(dbi, ILI9488_POWER_CTRL_1, 0x17, 0x15);
 	mipi_dbi_command(dbi, ILI9488_POWER_CTRL_2, 0x41);
 	mipi_dbi_command(dbi, ILI9488_VCOM_CTRL, 0x00, 0x12, 0x80);
@@ -126,13 +131,13 @@ static const struct drm_driver ili9488_driver = {
 static const struct of_device_id ili9488_of_match[] = {
 	{ .compatible = "ilitek,ili9488" },
 	{ .compatible = "picocalc,spilcd" },
-	{}
+	{},
 };
 MODULE_DEVICE_TABLE(of, ili9488_of_match);
 
 static const struct spi_device_id ili9488_id[] = {
 	{ "ili9488", 0 },
-	{}
+	{},
 };
 MODULE_DEVICE_TABLE(spi, ili9488_id);
 
@@ -140,15 +145,15 @@ static int ili9488_probe(struct spi_device *spi)
 {
 	struct device *dev = &spi->dev;
 	struct mipi_dbi_dev *dbidev;
-	struct mipi_dbi *dbi;
 	struct drm_device *drm;
+	struct mipi_dbi *dbi;
 	struct gpio_desc *dc;
 	struct backlight_properties props;
 	u32 rotation = 0;
 	int ret;
 
 	dbidev = devm_drm_dev_alloc(dev, &ili9488_driver,
-					struct mipi_dbi_dev, drm);
+				    struct mipi_dbi_dev, drm);
 	if (IS_ERR(dbidev))
 		return PTR_ERR(dbidev);
 
@@ -157,26 +162,22 @@ static int ili9488_probe(struct spi_device *spi)
 
 	dbi->reset = devm_gpiod_get(dev, "reset", GPIOD_OUT_HIGH);
 	if (IS_ERR(dbi->reset))
-		return dev_err_probe(dev, PTR_ERR(dbi->reset),
-				       "Failed to get GPIO 'reset'\n");
+		return dev_err_probe(dev, PTR_ERR(dbi->reset), "Failed to get GPIO 'reset'\n");
+
 	dc = devm_gpiod_get(dev, "dc", GPIOD_OUT_LOW);
 	if (IS_ERR(dc))
-		return dev_err_probe(dev, PTR_ERR(dc),
-				       "Failed to get GPIO 'dc'\n");
+		return dev_err_probe(dev, PTR_ERR(dc), "Failed to get GPIO 'dc'\n");
 
 	dbidev->backlight = devm_of_find_backlight(dev);
-	if (IS_ERR(dbidev->backlight)) {
+	if (IS_ERR(dbidev->backlight))
+	{
 		memset(&props, 0, sizeof(props));
 		props.type = BACKLIGHT_RAW;
 		props.max_brightness = 1;
-		dbidev->backlight = devm_backlight_device_register(dev,
-							 "ili9488-bl",
-							 dev, NULL,
-							 &dummy_backlight_ops,
-							 &props);
+		dbidev->backlight = devm_backlight_device_register(dev, "dummy-backlight",
+										dev, NULL, &dummy_backlight_ops, &props);
 		if (IS_ERR(dbidev->backlight))
-			return dev_err_probe(dev, PTR_ERR(dbidev->backlight),
-					       "Failed to register dummy-backlight\n");
+			return dev_err_probe(dev, PTR_ERR(dbidev->backlight), "Failed to register dummy-backlight\n");
 	}
 
 	device_property_read_u32(dev, "rotation", &rotation);
@@ -188,7 +189,7 @@ static int ili9488_probe(struct spi_device *spi)
 	dbi->read_commands = NULL;
 
 	ret = mipi_dbi_dev_init(dbidev, &ili9488_pipe_funcs,
-				 &ili9488_mode, rotation);
+		&ili9488_mode, rotation);
 	if (ret)
 		return ret;
 
