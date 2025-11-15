@@ -91,10 +91,17 @@
 		fps = <30>;
 		width = <320>;
 		height = <320>;
+
+		/****** FB Parameter names ******/
 		cs = <&gpio0 RK_PA4 GPIO_ACTIVE_HIGH>;
 		dc = <&gpio0 RK_PA3 GPIO_ACTIVE_HIGH>;
 		rst = <&gpio0 RK_PA2 GPIO_ACTIVE_HIGH>;
 		backlight = <&picocalc_mfd_bkl>;
+		/***** DRM driver Parameter names ******/
+		dc-gpios = <&gpio0 RK_PA3 GPIO_ACTIVE_HIGH>;
+        reset-gpios = <&gpio0 RK_PA2 GPIO_ACTIVE_HIGH>;
+		rotate = <0>;
+        buswidth = <8>;
 	};
 };
 
