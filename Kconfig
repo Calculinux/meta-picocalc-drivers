@@ -9,7 +9,7 @@ menuconfig STAGING_PICOCALC
 if STAGING_PICOCALC
 
 source "drivers/staging/picocalc/picocalc_kbd/Kconfig"
-source "drivers/staging/picocalc/picocalc_lcd/Kconfig"
+source "drivers/staging/picocalc/picocalc_lcd_fb/Kconfig"
 source "drivers/staging/picocalc/picocalc_lcd_drm/Kconfig"
 source "drivers/staging/picocalc/picocalc_snd-pwm/Kconfig"
 source "drivers/staging/picocalc/picocalc_snd-softpwm/Kconfig"
