@@ -69,7 +69,6 @@
 	ili9488 {
 		ili9488_pins: ili9488-pins {
 			rockchip,pins =
-				<0 RK_PA4 RK_FUNC_GPIO &pcfg_pull_none>,
 				<0 RK_PA3 RK_FUNC_GPIO &pcfg_pull_none>,
 				<0 RK_PA2 RK_FUNC_GPIO &pcfg_pull_none>;
 		};
@@ -79,7 +78,8 @@
 &spi0 {
 	status = "okay";
 	pinctrl-names = "default";
-	pinctrl-0 = <&rm_io7_spi0_clk &rm_io6_spi0_mosi &rm_io5_spi0_miso>;
+	pinctrl-0 = <&rm_io4_spi0_csn0 &rm_io5_spi0_miso &rm_io6_spi0_mosi &rm_io7_spi0_clk>;
+	num-cs = <1>;
 
 	ili9488: ili9488@0 {
 		status = "okay";
@@ -92,10 +92,6 @@
 		width = <320>;
 		height = <320>;
 
-		/****** FB Parameter names ******/
-		cs = <&gpio0 RK_PA4 GPIO_ACTIVE_HIGH>;
-		dc = <&gpio0 RK_PA3 GPIO_ACTIVE_HIGH>;
-		rst = <&gpio0 RK_PA2 GPIO_ACTIVE_HIGH>;
 		backlight = <&picocalc_mfd_bkl>;
 		/***** DRM driver Parameter names ******/
 		dc-gpios = <&gpio0 RK_PA3 GPIO_ACTIVE_HIGH>;
