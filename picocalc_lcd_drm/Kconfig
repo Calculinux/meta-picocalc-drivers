@@ -2,7 +2,9 @@
 
 config PICOCALC_LCD_DRM
 	tristate "PicoCalc TinyDRM LCD driver"
-	depends on DRM && SPI && DRM_MIPI_DBI
+	depends on DRM && DRM_KMS_HELPER && DRM_MIPI_DBI && SPI
+	depends on BACKLIGHT_CLASS_DEVICE || BACKLIGHT_CLASS_DEVICE=n
+	select DRM_GEM_DMA_HELPER
 	help
 	  Enable the TinyDRM-based driver for the PicoCalc ILI9488 SPI
 	  panel. This provides a DRM/KMS interface (via mipi-dbi) so
