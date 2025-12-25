@@ -32,7 +32,9 @@ jobs:
           rsync \
           git \
           wget \
-          debhelper
+          debhelper \
+          gcc-arm-linux-gnueabihf \
+          g++-arm-linux-gnueabihf
     
     - name: Checkout Linux kernel sources
       uses: actions/checkout@v4
