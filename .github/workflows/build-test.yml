@@ -1,0 +1,115 @@
+name: Build Test
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build-drivers:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout driver sources
+      uses: actions/checkout@v4
+      with:
+        path: picocalc-drivers
+    
+    - name: Install build dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          build-essential \
+          bc \
+          bison \
+          flex \
+          libssl-dev \
+          libelf-dev \
+          kmod \
+          cpio \
+          rsync \
+          git \
+          wget \
+          debhelper
+    
+    - name: Checkout Linux kernel sources
+      uses: actions/checkout@v4
+      with:
+        repository: Calculinux/luckfox-linux-6.1-rk3506
+        ref: e0846929f1a797988a6965268f391fdb779becfc
+        path: linux
+        fetch-depth: 1
+    
+    - name: Cache kernel build
+      id: cache-kernel
+      uses: actions/cache@v4
+      with:
+        path: linux
+        key: kernel-build-${{ runner.os }}-e0846929f1a797988a6965268f391fdb779becfc-${{ hashFiles('picocalc-drivers/.github/workflows/build-test.yml') }}
+        restore-keys: |
+          kernel-build-${{ runner.os }}-e0846929f1a797988a6965268f391fdb779becfc-
+    
+    - name: Configure kernel
+      if: steps.cache-kernel.outputs.cache-hit != 'true'
+      working-directory: linux
+      run: |
+        # Use the Luckfox defconfig as base
+        make ARCH=arm rk3506_luckfox_defconfig
+        
+        # Enable PicoCalc drivers in the config
+        # These would normally be enabled by kernel config fragments
+        scripts/config --enable CONFIG_STAGING
+        scripts/config --enable CONFIG_STAGING_PICOCALC
+        scripts/config --module CONFIG_PICOCALC_KBD
+        scripts/config --module CONFIG_PICOCALC_LCD_FB
+        scripts/config --module CONFIG_PICOCALC_LCD_DRM
+        scripts/config --module CONFIG_PICOCALC_SND_PWM
+        scripts/config --module CONFIG_PICOCALC_SND_SOFT_PWM
+        scripts/config --module CONFIG_PICOCALC_MFD
+        scripts/config --module CONFIG_PICOCALC_MFD_BMS
+        scripts/config --module CONFIG_PICOCALC_MFD_BKL
+        scripts/config --module CONFIG_PICOCALC_MFD_KBD
+        scripts/config --module CONFIG_PICOCALC_MFD_LED
+        
+        # Update config with dependencies
+        make ARCH=arm olddefconfig
+    
+    - name: Prepare kernel build
+      if: steps.cache-kernel.outputs.cache-hit != 'true'
+      working-directory: linux
+      run: |
+        # Prepare the kernel build (modules_prepare target)
+        # This generates necessary files for out-of-tree module builds
+        make ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- modules_prepare -j$(nproc)
+    
+    - name: Build PicoCalc drivers
+      working-directory: picocalc-drivers
+      run: |
+        # Build all drivers against the prepared kernel
+        make ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- KERNEL_SRC=$(pwd)/../linux all -j$(nproc)
+    
+    - name: Verify driver modules
+      working-directory: picocalc-drivers
+      run: |
+        # Check that .ko files were generated
+        echo "Checking for built kernel modules..."
+        find . -name "*.ko" -type f
+        
+        # Ensure at least some modules were built
+        MODULE_COUNT=$(find . -name "*.ko" -type f | wc -l)
+        if [ $MODULE_COUNT -eq 0 ]; then
+          echo "ERROR: No kernel modules were built!"
+          exit 1
+        fi
+        
+        echo "Successfully built $MODULE_COUNT kernel module(s)"
+    
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v4
+      if: success()
+      with:
+        name: picocalc-driver-modules
+        path: picocalc-drivers/**/*.ko
+        retention-days: 7
