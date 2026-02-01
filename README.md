@@ -28,6 +28,10 @@
    Device tree / runtime notes
    - The drivers support both a legacy keyboard driver and a new MFD-based keyboard. These can be installed simultaneously; the device tree 'compatible' strings and driver probe order control which driver binds at runtime.
    - The MFD core driver populates child platform devices for sub-drivers (keyboard, backlight, BMS, LED).
+   - Device tree source-of-truth lives in this repo. Linux files are prefixed `linux-` and U-Boot files are prefixed `uboot-`.
+      - Linux: `linux-rk3506-luckfox-lyra.dtsi`, `linux-rk3506g-luckfox-lyra.dts`
+      - U-Boot: `uboot-rk3506-luckfox.dtsi`, `uboot-rk3506-luckfox.dts`
+      The Yocto `picocalc-devicetree` recipe installs these into the sysroot using the historical filenames (no prefixes), so kernel/U-Boot recipes do not need to change.
 
    Contributing
    - Keep each driver in its own subdirectory with a small `Makefile`/Kbuild fragment if needed (see existing subdirs).
