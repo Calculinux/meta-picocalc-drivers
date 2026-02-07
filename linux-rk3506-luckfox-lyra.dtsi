@@ -207,6 +207,6 @@
 
 /********serial********/
 &uart1 {
-    pinctrl-0 = <&rm_io30_uart1_tx &rm_io28_uart1_rx>;
-    status = "okay";
+	pinctrl-0 = <&rm_io30_uart1_tx &rm_io28_uart1_rx>;
+	status = "okay";
 };
