@@ -143,13 +143,13 @@
 };
 
 &spi1 {
-    status = "okay";
-    mmc@0 {
-        compatible = "mmc-spi-slot";
-        reg = <0>;  // Chip Select 0
-        spi-max-frequency = <50000000>;
-        disable-cd;
-        disable-wp;
+	status = "okay";
+	mmc@0 {
+		compatible = "mmc-spi-slot";
+		reg = <0>;  // Chip Select 0
+		spi-max-frequency = <50000000>;
+		disable-cd;
+		disable-wp;
 		no-sdio;
-    };
+	};
 };
