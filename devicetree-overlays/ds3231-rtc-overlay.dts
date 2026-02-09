@@ -20,24 +20,24 @@
  */
 
 &i2c2 {
-#address-cells = <1>;
-#size-cells = <0>;
+    #address-cells = <1>;
+    #size-cells = <0>;
 
-status = "okay";
+    status = "okay";
 
-ds3231: rtc@68 {
-compatible = "maxim,ds3231";
-reg = <0x68>;
+    ds3231: rtc@68 {
+        compatible = "maxim,ds3231";
+        reg = <0x68>;
 
-/* Optional: Uncomment if using the interrupt pin for alarms
-interrupt-parent = <&gpio0>;
-interrupts = <RK_PA0 IRQ_TYPE_EDGE_FALLING>;
-*/
+        /* Optional: Uncomment if using the interrupt pin for alarms
+        interrupt-parent = <&gpio0>;
+        interrupts = <RK_PA0 IRQ_TYPE_EDGE_FALLING>;
+        */
 
-/* Optional: Enable wakeup capability
-wakeup-source;
-*/
+        /* Optional: Enable wakeup capability
+        wakeup-source;
+        */
 
-#clock-cells = <0>;
-};
+        #clock-cells = <0>;
+    };
 };
