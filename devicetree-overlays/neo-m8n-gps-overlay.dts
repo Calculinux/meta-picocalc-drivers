@@ -1,0 +1,63 @@
+/dts-v1/;
+/plugin/;
+
+#include <dt-bindings/pinctrl/rockchip.h>
+
+/*
+ * Device tree overlay for u-blox NEO-M8N GPS module
+ * 
+ * This overlay enables UART5 for communication with the u-blox NEO-M8N
+ * GPS module on the RMII1 test pads.
+ * 
+ * Pin Assignment (RMII1 test pads):
+ *   GPIO3_B4 (Pin 28) → TX (UART5_TX)
+ *   GPIO3_B3 (Pin 29) → RX (UART5_RX)
+ *   3.3V              → VCC
+ *   GND               → GND
+ * 
+ * The GPS module communicates at 9600 baud by default (configurable).
+ * NMEA sentences are output on the TX line and can be read via /dev/ttyS5.
+ * 
+ * Compatible with standard GPS applications:
+ *   - gpsd daemon
+ *   - gpsmon
+ *   - cgps
+ *   - Any application reading NMEA sentences
+ * 
+ * To apply this overlay at runtime:
+ *   mkdir -p /sys/kernel/config/device-tree/overlays/neo-m8n
+ *   cat /lib/firmware/overlays/neo-m8n-gps.dtbo > /sys/kernel/config/device-tree/overlays/neo-m8n/dtbo
+ *   echo 1 > /sys/kernel/config/device-tree/overlays/neo-m8n/status
+ * 
+ * To remove:
+ *   echo 0 > /sys/kernel/config/device-tree/overlays/neo-m8n/status
+ *   rmdir /sys/kernel/config/device-tree/overlays/neo-m8n
+ * 
+ * After loading, access the GPS via:
+ *   cat /dev/ttyS5               # Read raw NMEA sentences
+ *   gpsd /dev/ttyS5              # Start GPS daemon
+ *   gpsmon /dev/ttyS5            # Monitor GPS status
+ */
+
+&uart5 {
+    status = "okay";
+    
+    /* Default baud rate - u-blox NEO-M8N defaults to 9600 */
+    current-speed = <9600>;
+    
+    /* Pin configuration for UART5 */
+    pinctrl-names = "default";
+    pinctrl-0 = <&uart5m0_xfer>;
+    
+    /* GPS device node */
+    gps: neo-m8n@0 {
+        compatible = "u-blox,neo-m8n";
+        status = "okay";
+        
+        /* Optional: If using PPS (pulse-per-second) signal */
+        /* For high-precision time synchronization, connect PPS pin */
+        /*
+        pps-gpios = <&gpio3 RK_PB7 GPIO_ACTIVE_HIGH>;
+        */
+    };
+};
