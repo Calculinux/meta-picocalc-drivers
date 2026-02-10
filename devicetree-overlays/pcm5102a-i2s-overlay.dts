@@ -1,6 +1,8 @@
 /dts-v1/;
 /plugin/;
 
+#include <dt-bindings/pinctrl/rockchip.h>
+
 /*
  * Device tree overlay for PCM5102A I2S DAC
  * 
@@ -108,18 +110,12 @@
      *   Pin 34: GPIO3_A6 = SAI2_SDI_M0   (serial data in - unused for DAC)
      *   Pin 26: GPIO3_B6 = SAI2_MCLK_M0  (master clock - optional)
      *
-     * Rockchip numeric pin encoding used here (dtc without CPP):
-     *   RK_Pxy -> (port * 8) + pin
-     *     Port A=0, B=1, C=2, D=3
-     *   Examples:
-     *     RK_PA7 -> 0*8 + 7 = 7
-     *     RK_PB0 -> 1*8 + 0 = 8
-     *     RK_PB1 -> 1*8 + 1 = 9
-     *
-     * Format: <bank pin function &pull_config>
-     *   bank = GPIO bank number (e.g., 3 for GPIO3)
-     *   pin = numeric pin value as above
-     *   function = mux function (1 = SAI2_M0 on these pins)
+    * Pin macros (RK_PA7, RK_PB0, RK_PB1, RK_FUNC_GPIO) come from
+    * dt-bindings/pinctrl/rockchip.h and require CPP preprocessing before dtc.
+    *
+    * Format: <bank RK_Pxy function &pull_config>
+    *   bank = GPIO bank number (e.g., 3 for GPIO3)
+    *   function = mux function (1 = SAI2_M0 on these pins)
      */
     fragment@2 {
         target = <&pinctrl>;
@@ -127,11 +123,11 @@
             sai2_pins: sai2-pins {
                 rockchip,pins =
                     /* SAI2_LRCK_M0 on GPIO3_B1 (Pin 31) */
-                    <3 9 1 &pcfg_pull_none>,
+                    <3 RK_PB1 1 &pcfg_pull_none>,
                     /* SAI2_SCLK_M0 on GPIO3_A7 (Pin 33) */
-                    <3 7 1 &pcfg_pull_none>,
+                    <3 RK_PA7 1 &pcfg_pull_none>,
                     /* SAI2_SDO_M0 on GPIO3_B0 (Pin 32) */
-                    <3 8 1 &pcfg_pull_none>;
+                    <3 RK_PB0 1 &pcfg_pull_none>;
                     /* Optional MCLK (SAI2_MCLK_M0 on GPIO3_B6): add RK_PB6 here if needed. */
             };
         };
