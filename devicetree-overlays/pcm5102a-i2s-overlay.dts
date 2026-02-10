@@ -1,0 +1,137 @@
+/dts-v1/;
+/plugin/;
+
+/*
+ * Device tree overlay for PCM5102A I2S DAC
+ * 
+ * This overlay adds support for the TI PCM5102A I2S stereo DAC module
+ * connected to SAI2 (I2S interface 2) on the RK3506.
+ * 
+ * Connections (PCM5102A module pins → Lyra RMII1 test pads):
+ *   VCC  -> 3.3V
+ *   GND  -> GND
+ *   BCK  -> GPIO3_A7 (Pin 33) - SAI2_SCLK_M0 (bit clock)
+ *   DIN  -> GPIO3_B0 (Pin 32) - SAI2_SDO_M0  (serial data out from SoC)
+ *   LCK  -> GPIO3_B1 (Pin 31) - SAI2_LRCK_M0 (left/right clock / word select)
+ *   FLT  -> GND (filter select, ground for normal latency)
+ *   DEMP -> GND (de-emphasis off)
+ *   XSMT -> 3.3V (soft mute off)
+ * 
+ * Optional connection:
+ *   SCK  -> GPIO3_B6 (Pin 26) - SAI2_MCLK_M0 (master clock - leave unconnected if not used)
+ * 
+ * Optional jumpers on module (if available):
+ *   - H1L = Low (3.3V system)
+ *   - H2L = Low (I2S standard format)
+ *   - H3L = Low (I2S standard format)
+ *   - H4L = Low (I2S standard format)
+ * 
+ * Pin assignments (based on RK3506 datasheet Table 2-3):
+ *   GPIO3_A7 (Pin 33) = SAI2_SCLK_M0  → BCK on PCM5102A
+ *   GPIO3_B0 (Pin 32) = SAI2_SDO_M0   → DIN on PCM5102A
+ *   GPIO3_B1 (Pin 31) = SAI2_LRCK_M0  → LCK on PCM5102A
+ *   GPIO3_A6 (Pin 34) = SAI2_SDI_M0   → Unused (no ADC input needed)
+ *   GPIO3_B6 (Pin 26) = SAI2_MCLK_M0  → SCK on PCM5102A (optional)
+ * 
+ * These are the RMII1 Ethernet test pad pins on the Luckfox Lyra.
+ * 
+ * To apply this overlay at runtime:
+ *   mkdir -p /sys/kernel/config/device-tree/overlays/pcm5102a
+ *   cat /lib/firmware/overlays/pcm5102a-i2s.dtbo > /sys/kernel/config/device-tree/overlays/pcm5102a/dtbo
+ *   echo 1 > /sys/kernel/config/device-tree/overlays/pcm5102a/status
+ * 
+ * To remove:
+ *   echo 0 > /sys/kernel/config/device-tree/overlays/pcm5102a/status
+ *   rmdir /sys/kernel/config/device-tree/overlays/pcm5102a
+ * 
+ * After applying, the sound card should appear:
+ *   aplay -l
+ *   speaker-test -D hw:0,0 -c 2
+ */
+
+/ {
+    compatible = "rockchip,rk3506";
+
+    fragment@0 {
+        target-path = "/";
+        __overlay__ {
+            /* PCM5102A codec node - no I2C control needed */
+            pcm5102a_codec: pcm5102a-codec {
+                #sound-dai-cells = <0>;
+                compatible = "ti,pcm5102a";
+                status = "okay";
+            };
+
+            /* Simple audio card binding */
+            sound_i2s: sound-i2s {
+                compatible = "simple-audio-card";
+                simple-audio-card,name = "picocalc-i2s-audio";
+                simple-audio-card,format = "i2s";
+                simple-audio-card,mclk-fs = <256>;
+                simple-audio-card,bitclock-master = <&dailink_master>;
+                simple-audio-card,frame-master = <&dailink_master>;
+                status = "okay";
+
+                dailink_master: simple-audio-card,cpu {
+                    sound-dai = <&sai2>;
+                    /* SoC is the master, generates clocks */
+                };
+
+                simple-audio-card,codec {
+                    sound-dai = <&pcm5102a_codec>;
+                };
+            };
+        };
+    };
+
+    /* Enable and configure SAI2 (I2S2) controller */
+    fragment@1 {
+        target = <&sai2>;
+        __overlay__ {
+            #sound-dai-cells = <0>;
+            status = "okay";
+            pinctrl-names = "default";
+            pinctrl-0 = <&sai2_pins>;
+            rockchip,clk-trcm = <1>; /* TX and RX share clock */
+            rockchip,playback-channels = <2>;
+            rockchip,capture-channels = <2>;
+        };
+    };
+
+    /* 
+     * Pin configuration for SAI2_M0 (RMII1 test pads on Luckfox Lyra)
+     * 
+     * These pins are connected to the RMII1 Ethernet test pads on the Lyra:
+     *   Pin 33: GPIO3_A7 = SAI2_SCLK_M0  (bit clock)
+     *   Pin 32: GPIO3_B0 = SAI2_SDO_M0   (serial data out to DAC)
+     *   Pin 31: GPIO3_B1 = SAI2_LRCK_M0  (left/right clock)
+     *   Pin 34: GPIO3_A6 = SAI2_SDI_M0   (serial data in - unused for DAC)
+     *   Pin 26: GPIO3_B6 = SAI2_MCLK_M0  (master clock - optional)
+     * 
+     * GPIO Bank/Pin encoding for Rockchip:
+     *   GPIO3_A7 = Bank 3, Port A, Pin 7
+     *   GPIO3_B0 = Bank 3, Port B, Pin 0
+     *   GPIO3_B1 = Bank 3, Port B, Pin 1
+     * 
+     * Format: <bank RK_Pxy function &pull_config>
+     * where x = port letter (A/B/C/D), y = pin number (0-7)
+     * Function numbers are from multiplexing - typically 1-7 for alternate functions
+     */
+    fragment@2 {
+        target = <&pinctrl>;
+        __overlay__ {
+            sai2_pins: sai2-pins {
+                rockchip,pins =
+                    /* SAI2_LRCK_M0 on GPIO3_B1 (Pin 31) */
+                    <3 RK_PB1 1 &pcfg_pull_none>,
+                    /* SAI2_SCLK_M0 on GPIO3_A7 (Pin 33) */
+                    <3 RK_PA7 1 &pcfg_pull_none>,
+                    /* SAI2_SDO_M0 on GPIO3_B0 (Pin 32) */
+                    <3 RK_PB0 1 &pcfg_pull_none>;
+                    /* Optional: Uncomment to enable master clock
+                    <3 RK_PB6 1 &pcfg_pull_none>,  // SAI2_MCLK_M0
+                    */
+            };
+        };
+    };
+};
