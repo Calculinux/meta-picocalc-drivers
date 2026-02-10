@@ -181,6 +181,47 @@ static inline int kbd_read_i2c_2u8(struct kbd_ctx* ctx, uint8_t reg_addr,
 // Shared global state for global interfaces such as sysfs
 struct kbd_ctx *g_ctx;
 
+// Sysfs attribute for mouse mode control
+static ssize_t mouse_mode_show(struct device *dev,
+                                struct device_attribute *attr, char *buf)
+{
+    struct kbd_ctx *ctx = dev_get_drvdata(dev);
+    return sprintf(buf, "%d\n", ctx->mouse_mode ? 1 : 0);
+}
+
+static ssize_t mouse_mode_store(struct device *dev,
+                                 struct device_attribute *attr,
+                                 const char *buf, size_t count)
+{
+    struct kbd_ctx *ctx = dev_get_drvdata(dev);
+    int value;
+    
+    if (kstrtoint(buf, 10, &value) < 0)
+        return -EINVAL;
+    
+    ctx->mouse_mode = (value != 0);
+    
+    // Report switch state change via input event
+    input_report_switch(ctx->input_dev, SW_TABLET_MODE, ctx->mouse_mode);
+    input_sync(ctx->input_dev);
+    
+    dev_info(dev, "Mouse mode %s via sysfs\n",
+             ctx->mouse_mode ? "enabled" : "disabled");
+    
+    return count;
+}
+
+static DEVICE_ATTR_RW(mouse_mode);
+
+static struct attribute *kbd_attrs[] = {
+    &dev_attr_mouse_mode.attr,
+    NULL,
+};
+
+static const struct attribute_group kbd_attr_group = {
+    .attrs = kbd_attrs,
+};
+
 void input_fw_read_fifo(struct kbd_ctx* ctx)
 {
     uint8_t fifo_idx;
@@ -270,6 +311,9 @@ Special logic for Shift:
         if (ctx->left_shift_pressed && ctx->right_shift_pressed) {
             ctx->mouse_mode = !ctx->mouse_mode;
             // Press both Shifts simultaneously to toggle mouse mode
+            // Update switch to reflect mouse mode state
+            input_report_switch(ctx->input_dev, SW_TABLET_MODE, ctx->mouse_mode);
+            input_sync(ctx->input_dev);
         }
     } else if ((ev->state == KEY_STATE_RELEASED) && (ev->scancode == 0xA2 || ev->scancode == 0xA3)){
         if (!ctx->left_shift_pressed && !ctx->right_shift_pressed) {
@@ -529,6 +573,30 @@ static void kbd_timer_function(struct timer_list *data)
     mod_timer(&g_kbd_timer, jiffies + HZ / 128);
 }
 
+// LED event handler - allows userspace to control mouse mode via LED
+static int kbd_led_event(struct input_dev *dev, unsigned int type,
+                         unsigned int code, int value)
+{
+    struct kbd_ctx *ctx = input_get_drvdata(dev);
+
+    if (type != EV_SW)
+        return -EINVAL;
+
+    if (code == SW_TABLET_MODE) {
+        // Set mouse mode based on switch value (0=off, 1=on)
+        ctx->mouse_mode = (value != 0);
+        // Report switch state change
+        input_report_switch(ctx->input_dev, SW_TABLET_MODE, ctx->mouse_mode);
+        input_sync(ctx->input_dev);
+        dev_info(&ctx->i2c_client->dev,
+            "Mouse mode %s by userspace\n",
+            ctx->mouse_mode ? "enabled" : "disabled");
+        return 0;
+    }
+
+    return -EINVAL;
+}
+
 int input_probe(struct i2c_client* i2c_client, struct regmap* regmap)
 {
     int rc, i;
@@ -590,6 +658,15 @@ int input_probe(struct i2c_client* i2c_client, struct regmap* regmap)
 */
     input_set_capability(g_ctx->input_dev, EV_KEY, BTN_LEFT);
     input_set_capability(g_ctx->input_dev, EV_KEY, BTN_RIGHT);
+
+    // Enable switch for mouse mode indication (use tablet mode semantically)
+    input_set_capability(g_ctx->input_dev, EV_SW, SW_TABLET_MODE);
+    __set_bit(EV_SW, g_ctx->input_dev->evbit);
+    __set_bit(SW_TABLET_MODE, g_ctx->input_dev->swbit);
+
+    // Register LED event handler for userspace control
+    g_ctx->input_dev->event = kbd_led_event;
+    input_set_drvdata(g_ctx->input_dev, g_ctx);
 
     // Request IRQ handler for I2C client and initialize workqueue
     /*
@@ -662,6 +739,13 @@ static int picocalc_mfd_kbd_probe(struct platform_device *pdev)
 
     platform_set_drvdata(pdev, g_ctx);
 
+    // Create sysfs attribute for mouse mode
+    rc = sysfs_create_group(&pdev->dev.kobj, &kbd_attr_group);
+    if (rc) {
+        dev_warn(dev, "Failed to create sysfs attributes: %d\n", rc);
+        // Non-fatal, continue anyway
+    }
+
     dev_info(dev, "Keyboard input driver registered successfully\n");
     return 0;
 }
@@ -671,6 +755,9 @@ static int picocalc_mfd_kbd_remove(struct platform_device *pdev)
     struct kbd_ctx *ctx = platform_get_drvdata(pdev);
 
     dev_info_fe(&pdev->dev, "%s Removing picocalc-kbd.\n", __func__);
+
+    // Remove sysfs attributes
+    sysfs_remove_group(&pdev->dev.kobj, &kbd_attr_group);
 
     input_shutdown(ctx->i2c_client);
 
