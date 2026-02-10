@@ -39,7 +39,7 @@
         target-path = "/";
         __overlay__ {
             /* LoRA device node for Meshtastic */
-            sx1262_lora: lora@0 {
+            sx1262_lora: lora {
                 compatible = "semtech,sx1262";
                 status = "okay";
                 
@@ -57,17 +57,33 @@
         target = <&pinctrl>;
         __overlay__ {
             sx1262_pins: sx1262-pins {
+                /*
+                 * Rockchip numeric pin encoding used here (dtc without CPP):
+                 *   RK_Pxy -> (port * 8) + pin
+                 *     Port A=0, B=1, C=2, D=3
+                 *   Examples:
+                 *     RK_PA6 -> 0*8 + 6 = 6
+                 *     RK_PB2 -> 1*8 + 2 = 10
+                 *     RK_PB5 -> 1*8 + 5 = 13
+                 *     RK_PB6 -> 1*8 + 6 = 14
+                 *     RK_PD0 -> 3*8 + 0 = 24
+                 *
+                 * Format: <bank pin function &pull_config>
+                 *   bank = GPIO bank number
+                 *   pin = numeric pin value as above
+                 *   function = 0 (GPIO)
+                 */
                 rockchip,pins =
                     /* SPI Clock - UART5_CTSN */
-                    <3 RK_PB2 RK_FUNC_GPIO &pcfg_pull_none>,
+                    <3 10 0 &pcfg_pull_none>,
                     /* SPI MOSI - UART5_RTSN */
-                    <3 RK_PB5 RK_FUNC_GPIO &pcfg_pull_none>,
+                    <3 13 0 &pcfg_pull_none>,
                     /* SPI MISO - SAI2_SDI_M0 */
-                    <3 RK_PA6 RK_FUNC_GPIO &pcfg_pull_none>,
+                    <3 6 0 &pcfg_pull_none>,
                     /* DIO1 - Interrupt input (pull-down for edge detection) */
-                    <3 RK_PB6 RK_FUNC_GPIO &pcfg_pull_down>,
+                    <3 14 0 &pcfg_pull_down>,
                     /* BUSY - Status input */
-                    <1 RK_PD0 RK_FUNC_GPIO &pcfg_pull_down>;
+                    <1 24 0 &pcfg_pull_down>;
             };
         };
     };

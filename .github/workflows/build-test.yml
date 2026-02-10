@@ -24,6 +24,7 @@ jobs:
           build-essential \
           bc \
           bison \
+          device-tree-compiler \
           flex \
           libssl-dev \
           libelf-dev \
@@ -91,6 +92,14 @@ jobs:
       run: |
         # Build all drivers against the prepared kernel
         make ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- KERNEL_SRC=$(pwd)/../linux all -j$(nproc)
+
+    - name: Validate device tree overlays
+      working-directory: picocalc-drivers
+      run: |
+        for f in devicetree-overlays/*-overlay.dts; do
+          echo "==> $f"
+          dtc -@ -I dts -O dtb -o /tmp/$(basename "$f" .dts).dtbo "$f"
+        done
     
     - name: Verify driver modules
       working-directory: picocalc-drivers
