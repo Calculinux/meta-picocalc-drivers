@@ -573,9 +573,9 @@ static void kbd_timer_function(struct timer_list *data)
     mod_timer(&g_kbd_timer, jiffies + HZ / 128);
 }
 
-// LED event handler - allows userspace to control mouse mode via LED
-static int kbd_led_event(struct input_dev *dev, unsigned int type,
-                         unsigned int code, int value)
+// Input event handler - allows userspace to control mouse mode via switch events
+static int kbd_event(struct input_dev *dev, unsigned int type,
+                     unsigned int code, int value)
 {
     struct kbd_ctx *ctx = input_get_drvdata(dev);
 
@@ -664,8 +664,8 @@ int input_probe(struct i2c_client* i2c_client, struct regmap* regmap)
     __set_bit(EV_SW, g_ctx->input_dev->evbit);
     __set_bit(SW_TABLET_MODE, g_ctx->input_dev->swbit);
 
-    // Register LED event handler for userspace control
-    g_ctx->input_dev->event = kbd_led_event;
+    // Register input event handler for userspace control
+    g_ctx->input_dev->event = kbd_event;
     input_set_drvdata(g_ctx->input_dev, g_ctx);
 
     // Request IRQ handler for I2C client and initialize workqueue
