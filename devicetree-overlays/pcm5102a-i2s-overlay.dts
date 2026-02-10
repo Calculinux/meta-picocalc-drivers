@@ -1,6 +1,8 @@
 /dts-v1/;
 /plugin/;
 
+#include <dt-bindings/pinctrl/rockchip.h>
+
 /*
  * Device tree overlay for PCM5102A I2S DAC
  * 
@@ -98,24 +100,22 @@
         };
     };
 
-    /* 
+    /*
      * Pin configuration for SAI2_M0 (RMII1 test pads on Luckfox Lyra)
-     * 
+     *
      * These pins are connected to the RMII1 Ethernet test pads on the Lyra:
      *   Pin 33: GPIO3_A7 = SAI2_SCLK_M0  (bit clock)
      *   Pin 32: GPIO3_B0 = SAI2_SDO_M0   (serial data out to DAC)
      *   Pin 31: GPIO3_B1 = SAI2_LRCK_M0  (left/right clock)
      *   Pin 34: GPIO3_A6 = SAI2_SDI_M0   (serial data in - unused for DAC)
      *   Pin 26: GPIO3_B6 = SAI2_MCLK_M0  (master clock - optional)
-     * 
-     * GPIO Bank/Pin encoding for Rockchip:
-     *   GPIO3_A7 = Bank 3, Port A, Pin 7
-     *   GPIO3_B0 = Bank 3, Port B, Pin 0
-     *   GPIO3_B1 = Bank 3, Port B, Pin 1
-     * 
-     * Format: <bank RK_Pxy function &pull_config>
-     * where x = port letter (A/B/C/D), y = pin number (0-7)
-     * Function numbers are from multiplexing - typically 1-7 for alternate functions
+     *
+    * Pin macros (RK_PA7, RK_PB0, RK_PB1, RK_FUNC_GPIO) come from
+    * dt-bindings/pinctrl/rockchip.h and require CPP preprocessing before dtc.
+    *
+    * Format: <bank RK_Pxy function &pull_config>
+    *   bank = GPIO bank number (e.g., 3 for GPIO3)
+    *   function = mux function (1 = SAI2_M0 on these pins)
      */
     fragment@2 {
         target = <&pinctrl>;
@@ -128,9 +128,7 @@
                     <3 RK_PA7 1 &pcfg_pull_none>,
                     /* SAI2_SDO_M0 on GPIO3_B0 (Pin 32) */
                     <3 RK_PB0 1 &pcfg_pull_none>;
-                    /* Optional: Uncomment to enable master clock
-                    <3 RK_PB6 1 &pcfg_pull_none>,  // SAI2_MCLK_M0
-                    */
+                    /* Optional MCLK (SAI2_MCLK_M0 on GPIO3_B6): add RK_PB6 here if needed. */
             };
         };
     };

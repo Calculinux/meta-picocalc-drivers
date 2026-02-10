@@ -1,6 +1,8 @@
 /dts-v1/;
 /plugin/;
 
+#include <dt-bindings/pinctrl/rockchip.h>
+
 /*
  * Device tree overlay for Waveshare SX1262HF LoRA module
  * 
@@ -39,7 +41,7 @@
         target-path = "/";
         __overlay__ {
             /* LoRA device node for Meshtastic */
-            sx1262_lora: lora@0 {
+            sx1262_lora: lora {
                 compatible = "semtech,sx1262";
                 status = "okay";
                 
@@ -57,6 +59,13 @@
         target = <&pinctrl>;
         __overlay__ {
             sx1262_pins: sx1262-pins {
+                /*
+                 * Pin macros (RK_PB2, RK_PB5, RK_PA6, RK_PB6, RK_PD0, RK_FUNC_GPIO)
+                 * come from dt-bindings/pinctrl/rockchip.h and require CPP
+                 * preprocessing before dtc.
+                 *
+                 * Format: <bank RK_Pxy RK_FUNC_GPIO &pull_config>
+                 */
                 rockchip,pins =
                     /* SPI Clock - UART5_CTSN */
                     <3 RK_PB2 RK_FUNC_GPIO &pcfg_pull_none>,
