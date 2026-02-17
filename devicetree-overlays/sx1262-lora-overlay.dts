@@ -52,7 +52,7 @@
                 num-chipselects = <0>;   /* CS tied to GND */
 
                 /* Child so spidev binds; meshtasticd opens this device */
-                lora_spidev: lora@0 {
+                lora_spidev: spidev@0 {
                     compatible = "rohm,dh2228fv";
                     reg = <0>;
                     spi-max-frequency = <2000000>;
