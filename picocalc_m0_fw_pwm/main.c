@@ -15,16 +15,16 @@ static uint32_t buf_size;
 static uint32_t read_idx;
 static uint32_t channels;
 static uint32_t format;
-static int16_t last_l, last_r;  /* hold current sample when not advancing */
+static int32_t last_l, last_r;  /* hold current sample when not advancing */
 static uint32_t buf_mask;       /* buf_size - 1, cached at play-start */
 static uint8_t *buf_ptr;        /* shmem->buffer pointer, cached at play-start */
 static uint32_t shmem_update_counter; /* batches shmem->read_idx writes */
-static unsigned int out_l, out_r;     /* previous DSM output, for integ1 feedback */
+static uint32_t out_l, out_r;   /* previous DSM output (0 or 1), for integ1 feedback */
 
-typedef void (*consume_fn_t)(int16_t *, int16_t *);
+typedef void (*consume_fn_t)(int32_t *, int32_t *);
 static consume_fn_t consume_fn;
 
-static void gpio_write_both(unsigned int bit_l, unsigned int bit_r)
+__attribute__((always_inline)) static inline void gpio_write_both(uint32_t bit_l, uint32_t bit_r)
 {
 	REG(GPIO4_BASE + GPIO_DR_L) = GPIO4_DR_WRITE(bit_l, bit_r);
 }
@@ -40,13 +40,13 @@ static void timer5_stop(void)
 	REG(TIMER0_CH5_BASE + TIMER_CTRL) = TIMER_STOP;
 }
 
-static void clear_timer5_irq(void)
+__attribute__((always_inline)) static inline void clear_timer5_irq(void)
 {
 	REG(TIMER0_CH5_BASE + TIMER_INTSTAT) = 1;
 }
 
 /* Advance read_idx by step bytes and batch-write to shared memory every 8 frames. */
-static void advance_read_idx(uint32_t step)
+__attribute__((always_inline)) static inline void advance_read_idx(uint32_t step)
 {
 	read_idx = (read_idx + step) & buf_mask;
 	if (++shmem_update_counter >= 8) {
@@ -56,28 +56,27 @@ static void advance_read_idx(uint32_t step)
 	}
 }
 
-static void consume_s16_stereo(int16_t *s16_l, int16_t *s16_r)
+static void consume_s16_stereo(int32_t *s32_l, int32_t *s32_r)
 {
 	uint32_t i = read_idx & buf_mask;
-	*s16_l = (int16_t)(buf_ptr[i] | (buf_ptr[(i + 1) & buf_mask] << 8));
+	*s32_l = (int16_t)(buf_ptr[i] | (buf_ptr[(i + 1) & buf_mask] << 8));
 	i = (read_idx + 2) & buf_mask;
-	*s16_r = (int16_t)(buf_ptr[i] | (buf_ptr[(i + 1) & buf_mask] << 8));
+	*s32_r = (int16_t)(buf_ptr[i] | (buf_ptr[(i + 1) & buf_mask] << 8));
 	advance_read_idx(4);
 }
 
-static void consume_s16_mono(int16_t *s16_l, int16_t *s16_r)
+static void consume_s16_mono(int32_t *s32_l, int32_t *s32_r)
 {
 	uint32_t i = read_idx & buf_mask;
-	*s16_l = (int16_t)(buf_ptr[i] | (buf_ptr[(i + 1) & buf_mask] << 8));
-	*s16_r = *s16_l;
+	*s32_l = (int16_t)(buf_ptr[i] | (buf_ptr[(i + 1) & buf_mask] << 8));
+	*s32_r = *s32_l;
 	advance_read_idx(2);
 }
 
-static void consume_u8(int16_t *s16_l, int16_t *s16_r)
+static void consume_u8(int32_t *s32_l, int32_t *s32_r)
 {
-	uint8_t u = buf_ptr[read_idx & buf_mask];
-	*s16_l = (int16_t)((u << 8) - 32768);
-	*s16_r = *s16_l;
+	*s32_l = (int32_t)(buf_ptr[read_idx & buf_mask] << 8) - 32768;
+	*s32_r = *s32_l;
 	advance_read_idx(1);
 }
 
@@ -92,17 +91,21 @@ void timer5_isr(void)
 		consume_fn(&last_l, &last_r);
 	}
 
-	/* 2nd-order delta-sigma for left (GPIO4_B2) */
-	integ1_l += last_l - (out_l ? DSM_HALF_SCALE : -DSM_HALF_SCALE);
+	/* 2nd-order delta-sigma, left channel (GPIO4_B2).
+	 * Branchless: out_l ∈ {0,1}; DSM_FULL_SCALE=2^15, DSM_HALF_SCALE=2^14.
+	 * (out?HALF:-HALF) = HALF-(out<<15); (out?FULL:-FULL) = FULL-(out<<16);
+	 * (integ>=0)?1:0 = 1-(uint32_t(integ)>>31)
+	 */
+	integ1_l += last_l + (int32_t)DSM_HALF_SCALE - (int32_t)(out_l << 15);
 	integ2_l += integ1_l;
-	out_l = (integ2_l >= 0) ? 1 : 0;
-	integ2_l -= out_l ? (int32_t)DSM_FULL_SCALE : -(int32_t)DSM_FULL_SCALE;
+	out_l = 1u - ((uint32_t)integ2_l >> 31);
+	integ2_l += (int32_t)DSM_FULL_SCALE - (int32_t)(out_l << 16);
 
-	/* 2nd-order delta-sigma for right (GPIO4_B3) */
-	integ1_r += last_r - (out_r ? DSM_HALF_SCALE : -DSM_HALF_SCALE);
+	/* 2nd-order delta-sigma, right channel (GPIO4_B3) — same structure */
+	integ1_r += last_r + (int32_t)DSM_HALF_SCALE - (int32_t)(out_r << 15);
 	integ2_r += integ1_r;
-	out_r = (integ2_r >= 0) ? 1 : 0;
-	integ2_r -= out_r ? (int32_t)DSM_FULL_SCALE : -(int32_t)DSM_FULL_SCALE;
+	out_r = 1u - ((uint32_t)integ2_r >> 31);
+	integ2_r += (int32_t)DSM_FULL_SCALE - (int32_t)(out_r << 16);
 
 	gpio_write_both(out_l, out_r);
 }
