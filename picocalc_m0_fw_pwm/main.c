@@ -15,10 +15,16 @@ static uint32_t buf_size;
 static uint32_t read_idx;
 static uint32_t channels;
 static uint32_t format;
-static uint8_t playing;
-static int16_t last_l, last_r;  /* hold current sample when not advancing */
+static int32_t last_l, last_r;  /* hold current sample when not advancing */
+static uint32_t buf_mask;       /* buf_size - 1, cached at play-start */
+static uint8_t *buf_ptr;        /* shmem->buffer pointer, cached at play-start */
+static uint32_t shmem_update_counter; /* batches shmem->read_idx writes */
+static uint32_t out_l, out_r;   /* previous DSM output (0 or 1), for integ1 feedback */
 
-static void gpio_write_both(unsigned int bit_l, unsigned int bit_r)
+typedef void (*consume_fn_t)(int32_t *, int32_t *);
+static consume_fn_t consume_fn;
+
+__attribute__((always_inline)) static inline void gpio_write_both(uint32_t bit_l, uint32_t bit_r)
 {
 	REG(GPIO4_BASE + GPIO_DR_L) = GPIO4_DR_WRITE(bit_l, bit_r);
 }
@@ -34,70 +40,86 @@ static void timer5_stop(void)
 	REG(TIMER0_CH5_BASE + TIMER_CTRL) = TIMER_STOP;
 }
 
-static void clear_timer5_irq(void)
+__attribute__((always_inline)) static inline void clear_timer5_irq(void)
 {
 	REG(TIMER0_CH5_BASE + TIMER_INTSTAT) = 1;
 }
 
-/* Get next sample(s) and advance read_idx. Returns L in *s16_l, R in *s16_r (stereo). */
-static void consume_frame(int16_t *s16_l, int16_t *s16_r)
+/* Advance read_idx by step bytes and batch-write to shared memory every 8 frames. */
+__attribute__((always_inline)) static inline void advance_read_idx(uint32_t step)
 {
-	uint32_t mask = buf_size - 1;
-	uint8_t *buf = (uint8_t *)shmem->buffer;
-
-	if (format == M0_FMT_S16_LE) {
-		uint32_t i = read_idx & mask;
-		*s16_l = (int16_t)(buf[i] | (buf[i + 1] << 8));
-		if (channels >= 2) {
-			i = (read_idx + 2) & mask;
-			*s16_r = (int16_t)(buf[i] | (buf[i + 1] << 8));
-		} else {
-			*s16_r = *s16_l;
-		}
-		read_idx = (read_idx + (channels >= 2 ? 4 : 2)) & mask;
+	read_idx = (read_idx + step) & buf_mask;
+	if (++shmem_update_counter >= 8) {
+		shmem_update_counter = 0;
 		shmem->read_idx = read_idx;
-	} else {
-		uint8_t u = buf[read_idx & mask];
-		*s16_l = (int16_t)((u << 8) - 32768);
-		*s16_r = *s16_l;
-		read_idx = (read_idx + 1) & mask;
-		shmem->read_idx = read_idx;
+		__dmb();
 	}
 }
 
+static void consume_s16_stereo(int32_t *s32_l, int32_t *s32_r)
+{
+	uint32_t i = read_idx & buf_mask;
+	*s32_l = (int16_t)(buf_ptr[i] | (buf_ptr[(i + 1) & buf_mask] << 8));
+	i = (read_idx + 2) & buf_mask;
+	*s32_r = (int16_t)(buf_ptr[i] | (buf_ptr[(i + 1) & buf_mask] << 8));
+	advance_read_idx(4);
+}
+
+static void consume_s16_mono(int32_t *s32_l, int32_t *s32_r)
+{
+	uint32_t i = read_idx & buf_mask;
+	*s32_l = (int16_t)(buf_ptr[i] | (buf_ptr[(i + 1) & buf_mask] << 8));
+	*s32_r = *s32_l;
+	advance_read_idx(2);
+}
+
+static void consume_u8(int32_t *s32_l, int32_t *s32_r)
+{
+	*s32_l = (int32_t)(buf_ptr[read_idx & buf_mask] << 8) - 32768;
+	*s32_r = *s32_l;
+	advance_read_idx(1);
+}
+
+__attribute__((section(".ramfunc")))
 void timer5_isr(void)
 {
 	clear_timer5_irq();
-	if (!playing) {
-		gpio_write_both(0, 0);
-		return;
-	}
 
 	phase_acc += sample_rate_hz;
 	if (phase_acc >= DS_RATE_HZ) {
 		phase_acc -= DS_RATE_HZ;
-		consume_frame(&last_l, &last_r);
+		consume_fn(&last_l, &last_r);
 	}
 
-	/* 2nd-order delta-sigma for left (GPIO4_B2) */
-	integ1_l += last_l;
+	/* 2nd-order delta-sigma, left channel (GPIO4_B2).
+	 * Branchless: out_l ∈ {0,1}; DSM_FULL_SCALE=2^15, DSM_HALF_SCALE=2^14.
+	 * (out?HALF:-HALF) = HALF-(out<<15); (out?FULL:-FULL) = FULL-(out<<16);
+	 * (integ>=0)?1:0 = 1-(uint32_t(integ)>>31)
+	 */
+	integ1_l += last_l + (int32_t)DSM_HALF_SCALE - (int32_t)(out_l << 15);
 	integ2_l += integ1_l;
-	unsigned int out_l = (integ2_l >= 0) ? 1 : 0;
-	integ2_l -= out_l ? (int32_t)DSM_FULL_SCALE : (int32_t)(-(int32_t)DSM_FULL_SCALE);
+	out_l = 1u - ((uint32_t)integ2_l >> 31);
+	integ2_l += (int32_t)DSM_FULL_SCALE - (int32_t)(out_l << 16);
 
-	/* 2nd-order delta-sigma for right (GPIO4_B3) */
-	integ1_r += last_r;
+	/* 2nd-order delta-sigma, right channel (GPIO4_B3) — same structure */
+	integ1_r += last_r + (int32_t)DSM_HALF_SCALE - (int32_t)(out_r << 15);
 	integ2_r += integ1_r;
-	unsigned int out_r = (integ2_r >= 0) ? 1 : 0;
-	integ2_r -= out_r ? (int32_t)DSM_FULL_SCALE : (int32_t)(-(int32_t)DSM_FULL_SCALE);
+	out_r = 1u - ((uint32_t)integ2_r >> 31);
+	integ2_r += (int32_t)DSM_FULL_SCALE - (int32_t)(out_r << 16);
 
 	gpio_write_both(out_l, out_r);
 }
 
 static void nvic_enable_timer5(void)
 {
-	/* NVIC_ISER0: IRQ 19 is bit 19 of word at offset 0 */
+	/* NVIC_ISER0: set bit 19 to enable IRQ 19 */
 	REG(0xE000E100) = (1u << TIMER0_CH5_IRQ);
+}
+
+static void nvic_disable_timer5(void)
+{
+	/* NVIC_ICER0: set bit 19 to disable IRQ 19 */
+	REG(0xE000E180) = (1u << TIMER0_CH5_IRQ);
 }
 
 static void hardware_init(void)
@@ -115,7 +137,6 @@ static void hardware_init(void)
 	/* Timer: load period, don't start yet */
 	REG(TIMER0_CH5_BASE + TIMER_LOAD0) = DS_PERIOD_TICKS;
 	REG(TIMER0_CH5_BASE + TIMER_CTRL) = TIMER_STOP;
-	nvic_enable_timer5();
 }
 
 int main(void)
@@ -129,19 +150,31 @@ int main(void)
 		if (shmem->ctrl == M0_CTRL_PLAY) {
 			sample_rate_hz = shmem->sample_rate;
 			buf_size = shmem->buf_size;
+			buf_mask = buf_size - 1;
+			buf_ptr = (uint8_t *)shmem->buffer;
 			read_idx = shmem->read_idx;
 			channels = shmem->channels;
 			format = shmem->format;
+			shmem_update_counter = 0;
 			integ1_l = integ2_l = 0;
 			integ1_r = integ2_r = 0;
+			out_l = out_r = 0;
 			phase_acc = 0;
 			last_l = last_r = 0;
-			playing = 1;
+			if (format == M0_FMT_S16_LE && channels >= 2)
+				consume_fn = consume_s16_stereo;
+			else if (format == M0_FMT_S16_LE)
+				consume_fn = consume_s16_mono;
+			else
+				consume_fn = consume_u8;
+			__asm volatile("" ::: "memory"); /* compiler barrier: all statics visible before IRQ fires */
+			nvic_enable_timer5();
 			timer5_start();
 			while (shmem->ctrl == M0_CTRL_PLAY)
 				;
-			playing = 0;
 			timer5_stop();
+			REG(TIMER0_CH5_BASE + TIMER_INTSTAT) = 1; /* clear any pending IRQ before masking */
+			nvic_disable_timer5();
 			gpio_write_both(0, 0);
 		}
 	}

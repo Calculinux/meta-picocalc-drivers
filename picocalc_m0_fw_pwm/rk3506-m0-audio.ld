@@ -18,6 +18,10 @@ SECTIONS
 
 	.text : {
 		. = ALIGN(4);
+		/* .ramfunc* is placed first so the ISR is nearest the vector table.
+		 * No LMA/VMA split or copy loop is needed: this firmware has no flash
+		 * region — remoteproc loads the entire image into SRAM at runtime. */
+		*(.ramfunc*)
 		*(.text*)
 		*(.rodata*)
 		. = ALIGN(4);

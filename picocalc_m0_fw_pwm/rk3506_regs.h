@@ -46,6 +46,10 @@
 #define DS_PERIOD_TICKS   50U
 #define DS_RATE_HZ        2000000U
 #define DSM_FULL_SCALE    32768
+#define DSM_HALF_SCALE    16384
+
+/* Data memory barrier — ensures M0 store is visible to A55 before proceeding */
+#define __dmb()  __asm volatile("dmb" ::: "memory")
 
 #define TIMER0_CH5_IRQ    19
 
