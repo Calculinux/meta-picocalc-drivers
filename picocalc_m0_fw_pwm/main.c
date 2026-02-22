@@ -15,7 +15,6 @@ static uint32_t buf_size;
 static uint32_t read_idx;
 static uint32_t channels;
 static uint32_t format;
-static volatile uint8_t playing;
 static int16_t last_l, last_r;  /* hold current sample when not advancing */
 static uint32_t buf_mask;       /* buf_size - 1, cached at play-start */
 static uint8_t *buf_ptr;        /* shmem->buffer pointer, cached at play-start */
@@ -86,10 +85,6 @@ __attribute__((section(".ramfunc")))
 void timer5_isr(void)
 {
 	clear_timer5_irq();
-	if (!playing) {
-		gpio_write_both(0, 0);
-		return;
-	}
 
 	phase_acc += sample_rate_hz;
 	if (phase_acc >= DS_RATE_HZ) {
@@ -114,8 +109,14 @@ void timer5_isr(void)
 
 static void nvic_enable_timer5(void)
 {
-	/* NVIC_ISER0: IRQ 19 is bit 19 of word at offset 0 */
+	/* NVIC_ISER0: set bit 19 to enable IRQ 19 */
 	REG(0xE000E100) = (1u << TIMER0_CH5_IRQ);
+}
+
+static void nvic_disable_timer5(void)
+{
+	/* NVIC_ICER0: set bit 19 to disable IRQ 19 */
+	REG(0xE000E180) = (1u << TIMER0_CH5_IRQ);
 }
 
 static void hardware_init(void)
@@ -133,7 +134,6 @@ static void hardware_init(void)
 	/* Timer: load period, don't start yet */
 	REG(TIMER0_CH5_BASE + TIMER_LOAD0) = DS_PERIOD_TICKS;
 	REG(TIMER0_CH5_BASE + TIMER_CTRL) = TIMER_STOP;
-	nvic_enable_timer5();
 }
 
 int main(void)
@@ -164,12 +164,12 @@ int main(void)
 				consume_fn = consume_s16_mono;
 			else
 				consume_fn = consume_u8;
-			playing = 1;
+			nvic_enable_timer5();
 			timer5_start();
 			while (shmem->ctrl == M0_CTRL_PLAY)
 				;
-			playing = 0;
 			timer5_stop();
+			nvic_disable_timer5();
 			gpio_write_both(0, 0);
 		}
 	}
