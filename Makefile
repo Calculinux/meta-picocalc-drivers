@@ -2,7 +2,8 @@
 
 # List of driver subdirectories. Keep names in sync with repo layout.
 SUBDIRS := picocalc_kbd picocalc_lcd_fb picocalc_lcd_drm picocalc_snd-pwm picocalc_snd-softpwm \
-		   picocalc_mfd picocalc_mfd_bms picocalc_mfd_bkl picocalc_mfd_kbd picocalc_mfd_led
+		   picocalc_mfd picocalc_mfd_bms picocalc_mfd_bkl picocalc_mfd_kbd picocalc_mfd_led \
+		   picocalc_rk3506_rproc picocalc_snd-m0pwm
 
 obj-$(CONFIG_PICOCALC_KBD)     += picocalc_kbd/
 obj-$(CONFIG_PICOCALC_LCD_FB)  += picocalc_lcd_fb/
@@ -14,6 +15,8 @@ obj-$(CONFIG_PICOCALC_MFD_BMS)     += picocalc_mfd_bms/
 obj-$(CONFIG_PICOCALC_MFD_BKL)     += picocalc_mfd_bkl/
 obj-$(CONFIG_PICOCALC_MFD_KBD)     += picocalc_mfd_kbd/
 obj-$(CONFIG_PICOCALC_MFD_LED)     += picocalc_mfd_led/
+obj-$(CONFIG_PICOCALC_RK3506_RPROC) += picocalc_rk3506_rproc/
+obj-$(CONFIG_PICOCALC_SND_M0PWM)   += picocalc_snd-m0pwm/
 
 # Kernel build targets
 # Allow overriding KERNEL_SRC from the environment/recipe (e.g. KSRC)
