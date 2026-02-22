@@ -167,11 +167,13 @@ int main(void)
 				consume_fn = consume_s16_mono;
 			else
 				consume_fn = consume_u8;
+			__asm volatile("" ::: "memory"); /* compiler barrier: all statics visible before IRQ fires */
 			nvic_enable_timer5();
 			timer5_start();
 			while (shmem->ctrl == M0_CTRL_PLAY)
 				;
 			timer5_stop();
+			REG(TIMER0_CH5_BASE + TIMER_INTSTAT) = 1; /* clear any pending IRQ before masking */
 			nvic_disable_timer5();
 			gpio_write_both(0, 0);
 		}
