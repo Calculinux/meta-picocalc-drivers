@@ -18,6 +18,7 @@ SECTIONS
 
 	.text : {
 		. = ALIGN(4);
+		*(.ramfunc*)
 		*(.text*)
 		*(.rodata*)
 		. = ALIGN(4);
