@@ -15,15 +15,53 @@
 #define M0_FIXED_BUF_SIZE        8192U
 #define M0_FIXED_BUF_MASK         (M0_FIXED_BUF_SIZE - 1U)
 
-static m0_audio_shmem_t *const shmem = (m0_audio_shmem_t *)M0_SHMEM_ADDR;
+/*
+ * Single struct for hand-tuned asm ISR: state and constants inlined (one load per
+ * access). Only timer_irq, gpio_dr, buf_ptr, shmem_base are addresses; rest are values.
+ * Layout byte offsets must match isr.S. Left and right DSM state are contiguous
+ * for LDM/STM (I1, I2, LAST, OUT per channel).
+ */
+typedef struct {
+	uint32_t timer_irq;
+	uint32_t gpio_dr;
+	uint32_t phase_acc;
+	uint32_t read_idx;
+	uint32_t buf_ptr;
+	uint32_t shmem_ctr;
+	uint32_t _pad0;
+	uint32_t _pad1;
+	/* Left channel DSM state (contiguous for LDM/STM) */
+	int32_t  integ1_l;
+	int32_t  integ2_l;
+	int32_t  last_l;
+	uint32_t out_l;
+	/* Right channel DSM state (contiguous for LDM/STM) */
+	int32_t  integ1_r;
+	int32_t  integ2_r;
+	int32_t  last_r;
+	uint32_t out_r;
+	uint32_t shmem_base;
+	uint32_t rate_48k;
+	uint32_t ds_rate;
+	uint32_t buf_mask;
+	uint32_t dsm_half;
+	uint32_t dsm_full;
+	uint32_t batch;
+	uint32_t gpio_base_mask;
+} m0_isr_globs_t;
 
-static int32_t integ1_l, integ2_l, integ1_r, integ2_r;
-static uint32_t phase_acc;
-static uint32_t read_idx;
-static int32_t last_l, last_r;  /* hold current sample when not advancing */
-static uint8_t *buf_ptr;        /* shmem->buffer pointer, cached at play-start */
-static uint32_t shmem_update_counter; /* batches shmem->read_idx writes */
-static uint32_t out_l, out_r;   /* previous DSM output (0 or 1), for integ1 feedback */
+m0_isr_globs_t m0_isr_globs __attribute__((used)) = {
+	.timer_irq     = TIMER0_CH5_BASE + TIMER_INTSTAT,
+	.gpio_dr       = GPIO4_BASE + GPIO_DR_L,
+	.rate_48k      = M0_FIXED_SAMPLE_RATE_HZ,
+	.ds_rate       = DS_RATE_HZ,
+	.buf_mask      = M0_FIXED_BUF_MASK,
+	.dsm_half      = (uint32_t)DSM_HALF_SCALE,
+	.dsm_full      = (uint32_t)DSM_FULL_SCALE,
+	.batch         = 8,
+	.gpio_base_mask = (0x0C00U << 16),
+	.shmem_base    = (uint32_t)M0_SHMEM_ADDR,
+};
 
 __attribute__((always_inline)) static inline void gpio_write_both(uint32_t bit_l, uint32_t bit_r)
 {
@@ -49,66 +87,27 @@ __attribute__((always_inline)) static inline void clear_timer5_irq(void)
 /* Advance read_idx by step bytes and batch-write to shared memory every 8 frames. */
 __attribute__((always_inline)) static inline void advance_read_idx(uint32_t step)
 {
-	read_idx = (read_idx + step) & M0_FIXED_BUF_MASK;
-	if (++shmem_update_counter >= 8) {
-		shmem_update_counter = 0;
-		shmem->read_idx = read_idx;
+	m0_isr_globs.read_idx = (m0_isr_globs.read_idx + step) & m0_isr_globs.buf_mask;
+	if (++m0_isr_globs.shmem_ctr >= m0_isr_globs.batch) {
+		m0_isr_globs.shmem_ctr = 0;
+		((m0_audio_shmem_t *)m0_isr_globs.shmem_base)->read_idx = m0_isr_globs.read_idx;
 		__dmb();
 	}
 }
 
-/* S16 LE stereo only (fixed config). Inlined into ISR to remove call overhead. */
+/* S16 LE stereo only (fixed config). Used from main loop only; ISR uses asm consume. */
 __attribute__((always_inline)) static inline void consume_s16_stereo(int32_t *s32_l, int32_t *s32_r)
 {
-	uint32_t i = read_idx & M0_FIXED_BUF_MASK;
-	*s32_l = (int16_t)(buf_ptr[i] | (buf_ptr[(i + 1) & M0_FIXED_BUF_MASK] << 8));
-	i = (read_idx + 2) & M0_FIXED_BUF_MASK;
-	*s32_r = (int16_t)(buf_ptr[i] | (buf_ptr[(i + 1) & M0_FIXED_BUF_MASK] << 8));
+	uint8_t *buf = (uint8_t *)m0_isr_globs.buf_ptr;
+	uint32_t i = m0_isr_globs.read_idx & m0_isr_globs.buf_mask;
+	*s32_l = (int16_t)(buf[i] | (buf[(i + 1) & m0_isr_globs.buf_mask] << 8));
+	i = (m0_isr_globs.read_idx + 2) & m0_isr_globs.buf_mask;
+	*s32_r = (int16_t)(buf[i] | (buf[(i + 1) & m0_isr_globs.buf_mask] << 8));
 	advance_read_idx(4);
 }
 
-/*
- * ISR is named TIMER0_CH5_IRQHandler so the vector table jumps here directly
- * (no asm wrapper: no push/bl timer5_isr/pop), saving ~8 cycles. Load order
- * (rate before phase) helps reduce load-use stalls. The compiler may still
- * use callee-saved regs (r4–r7); a hand-crafted naked asm ISR could save
- * the remaining push/pop if needed for a tighter cycle budget.
- */
-__attribute__((section(".ramfunc")))
-void TIMER0_CH5_IRQHandler(void)
-{
-	REG(TIMER0_CH5_BASE + TIMER_INTSTAT) = 1;
-
-	{
-		uint32_t phase = phase_acc + M0_FIXED_SAMPLE_RATE_HZ;
-		if (phase >= DS_RATE_HZ) {
-			phase -= DS_RATE_HZ;
-			consume_s16_stereo(&last_l, &last_r);
-		}
-		phase_acc = phase;
-	}
-
-	/* 2nd-order delta-sigma, left (GPIO4_B2). Write-back each step to
-	 * keep live values in r0–r3 and avoid callee-saved regs. */
-	{
-		uint32_t i1 = (uint32_t)((int32_t)integ1_l + last_l + (int32_t)DSM_HALF_SCALE - (int32_t)(out_l << 15));
-		integ1_l = (int32_t)i1;
-		uint32_t i2 = (uint32_t)((int32_t)integ2_l + (int32_t)i1);
-		out_l = 1u - (i2 >> 31);
-		integ2_l = (int32_t)((int32_t)i2 + (int32_t)DSM_FULL_SCALE - (int32_t)(out_l << 16));
-	}
-
-	/* Right channel (GPIO4_B3), same structure. */
-	{
-		uint32_t i1 = (uint32_t)((int32_t)integ1_r + last_r + (int32_t)DSM_HALF_SCALE - (int32_t)(out_r << 15));
-		integ1_r = (int32_t)i1;
-		uint32_t i2 = (uint32_t)((int32_t)integ2_r + (int32_t)i1);
-		out_r = 1u - (i2 >> 31);
-		integ2_r = (int32_t)((int32_t)i2 + (int32_t)DSM_FULL_SCALE - (int32_t)(out_r << 16));
-	}
-
-	REG(GPIO4_BASE + GPIO_DR_L) = GPIO4_DR_WRITE(out_l, out_r);
-}
+/* Hand-tuned asm ISR: load-order scheduling to avoid stalls, minimal push/pop. */
+void TIMER0_CH5_IRQHandler(void);
 
 static void nvic_enable_timer5(void)
 {
@@ -144,19 +143,20 @@ int main(void)
 	hardware_init();
 
 	for (;;) {
+		m0_audio_shmem_t *shmem = (m0_audio_shmem_t *)m0_isr_globs.shmem_base;
 		while (shmem->magic != M0_AUDIO_MAGIC)
 			;
 
 		if (shmem->ctrl == M0_CTRL_PLAY) {
-			buf_ptr = (uint8_t *)shmem->buffer;
-			read_idx = shmem->read_idx;
-			shmem_update_counter = 0;
-			integ1_l = integ2_l = 0;
-			integ1_r = integ2_r = 0;
-			out_l = out_r = 0;
-			phase_acc = 0;
-			last_l = last_r = 0;
-			__asm volatile("" ::: "memory"); /* compiler barrier: all statics visible before IRQ fires */
+			m0_isr_globs.buf_ptr = (uint32_t)shmem->buffer;
+			m0_isr_globs.read_idx = shmem->read_idx;
+			m0_isr_globs.shmem_ctr = 0;
+			m0_isr_globs.integ1_l = m0_isr_globs.integ2_l = 0;
+			m0_isr_globs.integ1_r = m0_isr_globs.integ2_r = 0;
+			m0_isr_globs.out_l = m0_isr_globs.out_r = 0;
+			m0_isr_globs.phase_acc = 0;
+			m0_isr_globs.last_l = m0_isr_globs.last_r = 0;
+			__asm volatile("" ::: "memory"); /* compiler barrier: state visible before IRQ */
 			nvic_enable_timer5();
 			timer5_start();
 			while (shmem->ctrl == M0_CTRL_PLAY)

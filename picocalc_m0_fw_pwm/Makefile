@@ -12,7 +12,7 @@ CFLAGS  = -mcpu=cortex-m0 -mthumb -Os -ffunction-sections -fdata-sections \
           -Wall -Wextra -nostdlib -I.
 LDFLAGS = -T rk3506-m0-audio.ld -nostdlib -Wl,--gc-sections
 
-OBJS = startup.o main.o resource_table.o
+OBJS = startup.o main.o isr.o resource_table.o
 ELF  = rk3506-m0-audio.elf
 
 all: $(ELF)

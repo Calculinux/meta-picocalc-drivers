@@ -64,6 +64,6 @@ SysTick_Handler:	b .
 	.weak Default_Handler
 Default_Handler:	b .
 
-	/* TIMER0_CH5_IRQHandler is implemented in C (main.c) for zero wrapper overhead. */
+	/* TIMER0_CH5_IRQHandler is implemented in isr.S (hand-tuned asm) for minimal stalls. */
 
 	/* _stack_top provided by linker script (end of RAM) */
