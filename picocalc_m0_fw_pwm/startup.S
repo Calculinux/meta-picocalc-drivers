@@ -67,8 +67,6 @@ Default_Handler:	b .
 	.thumb_func
 	.global TIMER0_CH5_IRQHandler
 TIMER0_CH5_IRQHandler:
-	push	{ lr }
-	bl	timer5_isr
-	pop	{ pc }
+	b	timer5_isr
 
 	/* _stack_top provided by linker script (end of RAM) */

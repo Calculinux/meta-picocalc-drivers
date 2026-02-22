@@ -47,10 +47,15 @@
 #define DS_RATE_HZ        2000000U
 #define DSM_FULL_SCALE    32768
 #define DSM_HALF_SCALE    16384
+#define DSM_FULL_SCALE_SHIFT  15   /* 1 << 15 == DSM_FULL_SCALE */
+#define DSM_HALF_SCALE_SHIFT  14   /* 1 << 14 == DSM_HALF_SCALE */
 
 /* Data memory barrier — ensures M0 store is visible to A55 before proceeding */
 #define __dmb()  __asm volatile("dmb" ::: "memory")
 
 #define TIMER0_CH5_IRQ    19
+
+/* NVIC_ICPR0: write 1 to bit N to clear the pending state for IRQ N */
+#define NVIC_ICPR0        0xE000E280U
 
 #endif /* RK3506_REGS_H */

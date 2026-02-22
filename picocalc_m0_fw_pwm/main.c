@@ -15,7 +15,6 @@ static uint32_t buf_size;
 static uint32_t read_idx;
 static uint32_t channels;
 static uint32_t format;
-static volatile uint8_t playing;
 static int16_t last_l, last_r;  /* hold current sample when not advancing */
 static uint32_t buf_mask;       /* buf_size - 1, cached at play-start */
 static uint8_t *buf_ptr;        /* shmem->buffer pointer, cached at play-start */
@@ -25,7 +24,7 @@ static unsigned int out_l, out_r;     /* previous DSM output, for integ1 feedbac
 typedef void (*consume_fn_t)(int16_t *, int16_t *);
 static consume_fn_t consume_fn;
 
-static void gpio_write_both(unsigned int bit_l, unsigned int bit_r)
+__attribute__((always_inline)) static inline void gpio_write_both(unsigned int bit_l, unsigned int bit_r)
 {
 	REG(GPIO4_BASE + GPIO_DR_L) = GPIO4_DR_WRITE(bit_l, bit_r);
 }
@@ -41,13 +40,13 @@ static void timer5_stop(void)
 	REG(TIMER0_CH5_BASE + TIMER_CTRL) = TIMER_STOP;
 }
 
-static void clear_timer5_irq(void)
+__attribute__((always_inline)) static inline void clear_timer5_irq(void)
 {
 	REG(TIMER0_CH5_BASE + TIMER_INTSTAT) = 1;
 }
 
 /* Advance read_idx by step bytes and batch-write to shared memory every 8 frames. */
-static void advance_read_idx(uint32_t step)
+__attribute__((always_inline)) static inline void advance_read_idx(uint32_t step)
 {
 	read_idx = (read_idx + step) & buf_mask;
 	if (++shmem_update_counter >= 8) {
@@ -86,10 +85,6 @@ __attribute__((section(".ramfunc")))
 void timer5_isr(void)
 {
 	clear_timer5_irq();
-	if (!playing) {
-		gpio_write_both(0, 0);
-		return;
-	}
 
 	phase_acc += sample_rate_hz;
 	if (phase_acc >= DS_RATE_HZ) {
@@ -97,17 +92,25 @@ void timer5_isr(void)
 		consume_fn(&last_l, &last_r);
 	}
 
-	/* 2nd-order delta-sigma for left (GPIO4_B2) */
-	integ1_l += last_l - (out_l ? DSM_HALF_SCALE : -DSM_HALF_SCALE);
-	integ2_l += integ1_l;
-	out_l = (integ2_l >= 0) ? 1 : 0;
-	integ2_l -= out_l ? (int32_t)DSM_FULL_SCALE : -(int32_t)DSM_FULL_SCALE;
+	/* 2nd-order delta-sigma for left (GPIO4_B2) — branchless: (2*out-1) encodes ±1 */
+	{
+		uint32_t fb_l = (out_l << 1) - 1u;
+		integ1_l += last_l - (int32_t)(fb_l << DSM_HALF_SCALE_SHIFT);
+		integ2_l += integ1_l;
+		out_l = ((uint32_t)integ2_l >> 31) ^ 1u;
+		fb_l = (out_l << 1) - 1u;
+		integ2_l -= (int32_t)(fb_l << DSM_FULL_SCALE_SHIFT);
+	}
 
 	/* 2nd-order delta-sigma for right (GPIO4_B3) */
-	integ1_r += last_r - (out_r ? DSM_HALF_SCALE : -DSM_HALF_SCALE);
-	integ2_r += integ1_r;
-	out_r = (integ2_r >= 0) ? 1 : 0;
-	integ2_r -= out_r ? (int32_t)DSM_FULL_SCALE : -(int32_t)DSM_FULL_SCALE;
+	{
+		uint32_t fb_r = (out_r << 1) - 1u;
+		integ1_r += last_r - (int32_t)(fb_r << DSM_HALF_SCALE_SHIFT);
+		integ2_r += integ1_r;
+		out_r = ((uint32_t)integ2_r >> 31) ^ 1u;
+		fb_r = (out_r << 1) - 1u;
+		integ2_r -= (int32_t)(fb_r << DSM_FULL_SCALE_SHIFT);
+	}
 
 	gpio_write_both(out_l, out_r);
 }
@@ -164,12 +167,14 @@ int main(void)
 				consume_fn = consume_s16_mono;
 			else
 				consume_fn = consume_u8;
-			playing = 1;
 			timer5_start();
 			while (shmem->ctrl == M0_CTRL_PLAY)
 				;
-			playing = 0;
+			/* Stop the timer, then clear INTSTAT (deassert IRQ level) and NVIC
+			 * pending so no stray ISR fires after this point. */
 			timer5_stop();
+			REG(TIMER0_CH5_BASE + TIMER_INTSTAT) = 1;
+			REG(NVIC_ICPR0) = (1u << TIMER0_CH5_IRQ);
 			gpio_write_both(0, 0);
 		}
 	}
