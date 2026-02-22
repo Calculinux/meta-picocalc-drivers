@@ -6,23 +6,24 @@
 
 #define REG(addr)   (*(volatile uint32_t *)(addr))
 
+/*
+ * Fixed config: fewer memory loads in the ISR and no format/sample-rate logic.
+ * ALSA on the host can do sample-rate conversion to this rate.
+ * Linux driver must use the same sample_rate and buf_size.
+ */
+#define M0_FIXED_SAMPLE_RATE_HZ  48000U
+#define M0_FIXED_BUF_SIZE        8192U
+#define M0_FIXED_BUF_MASK         (M0_FIXED_BUF_SIZE - 1U)
+
 static m0_audio_shmem_t *const shmem = (m0_audio_shmem_t *)M0_SHMEM_ADDR;
 
 static int32_t integ1_l, integ2_l, integ1_r, integ2_r;
 static uint32_t phase_acc;
-static uint32_t sample_rate_hz;
-static uint32_t buf_size;
 static uint32_t read_idx;
-static uint32_t channels;
-static uint32_t format;
 static int32_t last_l, last_r;  /* hold current sample when not advancing */
-static uint32_t buf_mask;       /* buf_size - 1, cached at play-start */
 static uint8_t *buf_ptr;        /* shmem->buffer pointer, cached at play-start */
 static uint32_t shmem_update_counter; /* batches shmem->read_idx writes */
 static uint32_t out_l, out_r;   /* previous DSM output (0 or 1), for integ1 feedback */
-
-typedef void (*consume_fn_t)(int32_t *, int32_t *);
-static consume_fn_t consume_fn;
 
 __attribute__((always_inline)) static inline void gpio_write_both(uint32_t bit_l, uint32_t bit_r)
 {
@@ -48,7 +49,7 @@ __attribute__((always_inline)) static inline void clear_timer5_irq(void)
 /* Advance read_idx by step bytes and batch-write to shared memory every 8 frames. */
 __attribute__((always_inline)) static inline void advance_read_idx(uint32_t step)
 {
-	read_idx = (read_idx + step) & buf_mask;
+	read_idx = (read_idx + step) & M0_FIXED_BUF_MASK;
 	if (++shmem_update_counter >= 8) {
 		shmem_update_counter = 0;
 		shmem->read_idx = read_idx;
@@ -56,58 +57,57 @@ __attribute__((always_inline)) static inline void advance_read_idx(uint32_t step
 	}
 }
 
-static void consume_s16_stereo(int32_t *s32_l, int32_t *s32_r)
+/* S16 LE stereo only (fixed config). Inlined into ISR to remove call overhead. */
+__attribute__((always_inline)) static inline void consume_s16_stereo(int32_t *s32_l, int32_t *s32_r)
 {
-	uint32_t i = read_idx & buf_mask;
-	*s32_l = (int16_t)(buf_ptr[i] | (buf_ptr[(i + 1) & buf_mask] << 8));
-	i = (read_idx + 2) & buf_mask;
-	*s32_r = (int16_t)(buf_ptr[i] | (buf_ptr[(i + 1) & buf_mask] << 8));
+	uint32_t i = read_idx & M0_FIXED_BUF_MASK;
+	*s32_l = (int16_t)(buf_ptr[i] | (buf_ptr[(i + 1) & M0_FIXED_BUF_MASK] << 8));
+	i = (read_idx + 2) & M0_FIXED_BUF_MASK;
+	*s32_r = (int16_t)(buf_ptr[i] | (buf_ptr[(i + 1) & M0_FIXED_BUF_MASK] << 8));
 	advance_read_idx(4);
 }
 
-static void consume_s16_mono(int32_t *s32_l, int32_t *s32_r)
-{
-	uint32_t i = read_idx & buf_mask;
-	*s32_l = (int16_t)(buf_ptr[i] | (buf_ptr[(i + 1) & buf_mask] << 8));
-	*s32_r = *s32_l;
-	advance_read_idx(2);
-}
-
-static void consume_u8(int32_t *s32_l, int32_t *s32_r)
-{
-	*s32_l = (int32_t)(buf_ptr[read_idx & buf_mask] << 8) - 32768;
-	*s32_r = *s32_l;
-	advance_read_idx(1);
-}
-
+/*
+ * ISR is named TIMER0_CH5_IRQHandler so the vector table jumps here directly
+ * (no asm wrapper: no push/bl timer5_isr/pop), saving ~8 cycles. Load order
+ * (rate before phase) helps reduce load-use stalls. The compiler may still
+ * use callee-saved regs (r4–r7); a hand-crafted naked asm ISR could save
+ * the remaining push/pop if needed for a tighter cycle budget.
+ */
 __attribute__((section(".ramfunc")))
-void timer5_isr(void)
+void TIMER0_CH5_IRQHandler(void)
 {
-	clear_timer5_irq();
+	REG(TIMER0_CH5_BASE + TIMER_INTSTAT) = 1;
 
-	phase_acc += sample_rate_hz;
-	if (phase_acc >= DS_RATE_HZ) {
-		phase_acc -= DS_RATE_HZ;
-		consume_fn(&last_l, &last_r);
+	{
+		uint32_t phase = phase_acc + M0_FIXED_SAMPLE_RATE_HZ;
+		if (phase >= DS_RATE_HZ) {
+			phase -= DS_RATE_HZ;
+			consume_s16_stereo(&last_l, &last_r);
+		}
+		phase_acc = phase;
 	}
 
-	/* 2nd-order delta-sigma, left channel (GPIO4_B2).
-	 * Branchless: out_l ∈ {0,1}; DSM_FULL_SCALE=2^15, DSM_HALF_SCALE=2^14.
-	 * (out?HALF:-HALF) = HALF-(out<<15); (out?FULL:-FULL) = FULL-(out<<16);
-	 * (integ>=0)?1:0 = 1-(uint32_t(integ)>>31)
-	 */
-	integ1_l += last_l + (int32_t)DSM_HALF_SCALE - (int32_t)(out_l << 15);
-	integ2_l += integ1_l;
-	out_l = 1u - ((uint32_t)integ2_l >> 31);
-	integ2_l += (int32_t)DSM_FULL_SCALE - (int32_t)(out_l << 16);
+	/* 2nd-order delta-sigma, left (GPIO4_B2). Write-back each step to
+	 * keep live values in r0–r3 and avoid callee-saved regs. */
+	{
+		uint32_t i1 = (uint32_t)((int32_t)integ1_l + last_l + (int32_t)DSM_HALF_SCALE - (int32_t)(out_l << 15));
+		integ1_l = (int32_t)i1;
+		uint32_t i2 = (uint32_t)((int32_t)integ2_l + (int32_t)i1);
+		out_l = 1u - (i2 >> 31);
+		integ2_l = (int32_t)((int32_t)i2 + (int32_t)DSM_FULL_SCALE - (int32_t)(out_l << 16));
+	}
 
-	/* 2nd-order delta-sigma, right channel (GPIO4_B3) — same structure */
-	integ1_r += last_r + (int32_t)DSM_HALF_SCALE - (int32_t)(out_r << 15);
-	integ2_r += integ1_r;
-	out_r = 1u - ((uint32_t)integ2_r >> 31);
-	integ2_r += (int32_t)DSM_FULL_SCALE - (int32_t)(out_r << 16);
+	/* Right channel (GPIO4_B3), same structure. */
+	{
+		uint32_t i1 = (uint32_t)((int32_t)integ1_r + last_r + (int32_t)DSM_HALF_SCALE - (int32_t)(out_r << 15));
+		integ1_r = (int32_t)i1;
+		uint32_t i2 = (uint32_t)((int32_t)integ2_r + (int32_t)i1);
+		out_r = 1u - (i2 >> 31);
+		integ2_r = (int32_t)((int32_t)i2 + (int32_t)DSM_FULL_SCALE - (int32_t)(out_r << 16));
+	}
 
-	gpio_write_both(out_l, out_r);
+	REG(GPIO4_BASE + GPIO_DR_L) = GPIO4_DR_WRITE(out_l, out_r);
 }
 
 static void nvic_enable_timer5(void)
@@ -148,25 +148,14 @@ int main(void)
 			;
 
 		if (shmem->ctrl == M0_CTRL_PLAY) {
-			sample_rate_hz = shmem->sample_rate;
-			buf_size = shmem->buf_size;
-			buf_mask = buf_size - 1;
 			buf_ptr = (uint8_t *)shmem->buffer;
 			read_idx = shmem->read_idx;
-			channels = shmem->channels;
-			format = shmem->format;
 			shmem_update_counter = 0;
 			integ1_l = integ2_l = 0;
 			integ1_r = integ2_r = 0;
 			out_l = out_r = 0;
 			phase_acc = 0;
 			last_l = last_r = 0;
-			if (format == M0_FMT_S16_LE && channels >= 2)
-				consume_fn = consume_s16_stereo;
-			else if (format == M0_FMT_S16_LE)
-				consume_fn = consume_s16_mono;
-			else
-				consume_fn = consume_u8;
 			__asm volatile("" ::: "memory"); /* compiler barrier: all statics visible before IRQ fires */
 			nvic_enable_timer5();
 			timer5_start();

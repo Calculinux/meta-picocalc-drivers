@@ -14,13 +14,16 @@
 #include <sound/core.h>
 #include <sound/pcm.h>
 
-/* Must match picocalc_m0_fw_pwm/shmem.h */
+/* Must match picocalc_m0_fw_pwm/shmem.h and main.c fixed config */
 #define M0_AUDIO_MAGIC    0x4D305057U
 #define M0_CTRL_PLAY      (1u << 0)
 #define M0_CTRL_STOP      0u
 #define M0_FMT_U8         0
 #define M0_FMT_S16_LE     1
 #define M0_HEADER_SIZE    64
+/* Fixed M0 config: ALSA does SRC to this rate; ring size must match firmware */
+#define M0_FIXED_SAMPLE_RATE_HZ  48000U
+#define M0_FIXED_BUF_SIZE        8192U
 
 struct m0_audio_shmem {
 	volatile uint32_t magic;
@@ -120,14 +123,15 @@ static int m0pwm_pcm_open(struct snd_pcm_substream *ss)
 {
 	struct picocalc_m0pwm *m = snd_pcm_substream_chip(ss);
 
+	/* Fixed config: M0 firmware is 48 kHz S16 LE stereo only; ALSA SRC handles other rates */
 	ss->runtime->hw = (struct snd_pcm_hardware){
 		.info = SNDRV_PCM_INFO_MMAP | SNDRV_PCM_INFO_MMAP_VALID |
 			SNDRV_PCM_INFO_INTERLEAVED | SNDRV_PCM_INFO_HALF_DUPLEX,
-		.formats = SNDRV_PCM_FMTBIT_S16_LE | SNDRV_PCM_FMTBIT_U8,
-		.rates = SNDRV_PCM_RATE_8000 | SNDRV_PCM_RATE_22050 | SNDRV_PCM_RATE_44100,
-		.rate_min = 8000,
-		.rate_max = 44100,
-		.channels_min = 1,
+		.formats = SNDRV_PCM_FMTBIT_S16_LE,
+		.rates = SNDRV_PCM_RATE_48000,
+		.rate_min = M0_FIXED_SAMPLE_RATE_HZ,
+		.rate_max = M0_FIXED_SAMPLE_RATE_HZ,
+		.channels_min = 2,
 		.channels_max = 2,
 		.buffer_bytes_max = 32768,
 		.period_bytes_min = 1024,
@@ -182,10 +186,10 @@ static int m0pwm_pcm_trigger(struct snd_pcm_substream *ss, int cmd)
 		m->shmem->write_idx = 0;
 		m->shmem->read_idx = 0;
 		m->shmem->period_bytes = frames_to_bytes(runtime, runtime->period_size);
-		m->shmem->buf_size = m->buf_size;
-		m->shmem->sample_rate = runtime->rate;
-		m->shmem->channels = runtime->channels;
-		m->shmem->format = (runtime->format == SNDRV_PCM_FORMAT_S16_LE) ? M0_FMT_S16_LE : M0_FMT_U8;
+		m->shmem->buf_size = m->buf_size;  /* must be M0_FIXED_BUF_SIZE */
+		m->shmem->sample_rate = M0_FIXED_SAMPLE_RATE_HZ;
+		m->shmem->channels = 2;
+		m->shmem->format = M0_FMT_S16_LE;
 
 		m->last_read_idx = 0;
 		m->copied_bytes = 0;
@@ -293,15 +297,9 @@ static int m0pwm_probe(struct platform_device *pdev)
 	m->shmem = (struct m0_audio_shmem *)m->shmem_io;
 
 	if (of_property_read_u32(np, "ring-buffer-bytes", &m->buf_size))
-		m->buf_size = 16384;
-	if (m->buf_size < 8192 || m->buf_size > m->shmem_size - M0_HEADER_SIZE)
-		m->buf_size = 16384;
-	/* Power-of-two for ring mask */
-	if (m->buf_size & (m->buf_size - 1)) {
-		uint32_t p = 8192;
-		while (p < m->buf_size) p *= 2;
-		m->buf_size = p;
-	}
+		m->buf_size = M0_FIXED_BUF_SIZE;
+	if (m->buf_size != M0_FIXED_BUF_SIZE || m->buf_size > m->shmem_size - M0_HEADER_SIZE)
+		m->buf_size = M0_FIXED_BUF_SIZE;
 
 	ret = snd_card_new(dev, SNDRV_DEFAULT_IDX1, "picocalc-m0pwm",
 			   THIS_MODULE, 0, &m->card);
