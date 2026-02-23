@@ -5,6 +5,7 @@
  */
 
 #include <asm/barrier.h>
+#include <linux/delay.h>
 #include <linux/hrtimer.h>
 #include <linux/io.h>
 #include <linux/ktime.h>
@@ -175,7 +176,9 @@ static enum hrtimer_restart m0_timer_cb(struct hrtimer *t)
 
 static int m0_pcm_open(struct snd_pcm_substream *ss)
 {
-	struct picocalc_m0 *m = snd_pcm_substream_chip(ss);
+	struct picocalc_m0 *m = ss->pcm->card->private_data;
+
+	ss->private_data = m;
 
 	/* Fixed config: M0 firmware is 48 kHz S16 LE stereo only; ALSA SRC handles other rates */
 	ss->runtime->hw = (struct snd_pcm_hardware){
@@ -352,7 +355,7 @@ static int m0_probe(struct platform_device *pdev)
 	if (m->buf_size != M0_FIXED_BUF_SIZE || m->buf_size > m->shmem_size - M0_HEADER_SIZE)
 		m->buf_size = M0_FIXED_BUF_SIZE;
 
-	ret = snd_card_new(dev, SNDRV_DEFAULT_IDX1, "picocalc-m0",
+	ret = snd_card_new(dev, 0, "picocalc-m0",
 			   THIS_MODULE, 0, &m->card);
 	if (ret < 0)
 		goto memunmap;
@@ -368,7 +371,7 @@ static int m0_probe(struct platform_device *pdev)
 		if (ret < 0)
 			goto card_free;
 		snd_pcm_set_ops(pcm, SNDRV_PCM_STREAM_PLAYBACK, &m0_pcm_ops);
-		snd_pcm_set_drvdata(pcm, m);
+		pcm->private_data = m;
 		strscpy(pcm->name, "M0 DAC", sizeof(pcm->name));
 		snd_pcm_lib_preallocate_pages_for_all(pcm,
 					      SNDRV_DMA_TYPE_CONTINUOUS,
