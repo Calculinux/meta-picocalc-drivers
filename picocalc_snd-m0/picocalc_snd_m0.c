@@ -17,7 +17,7 @@
 #include <sound/core.h>
 #include <sound/pcm.h>
 
-/* Must match picocalc_m0_fw/shmem.h and main.c fixed config */
+/* Must match picocalc_m0_audio_fw/shmem.h and main.c fixed config */
 #define M0_AUDIO_MAGIC    0x4D304431U
 #define M0_CTRL_PLAY      (1u << 0)
 #define M0_CTRL_STOP      0u
