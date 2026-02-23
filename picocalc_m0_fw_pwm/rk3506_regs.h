@@ -75,4 +75,18 @@
 
 #define TIMER0_CH5_IRQ    19
 
+/* GRF — M0 wake/sleep control (TRM §4.6, GRF_SOC_CON37). Host (A55) writes these to
+ * wake M0 from WFE or WIC deep sleep. Operational base 0xFF288000.
+ * Write-enable: bits 31:16; to write bit N set bit (N+16). */
+#define GRF_BASE              0xFF288000U
+#define GRF_SOC_CON37         0x0094U
+#define GRF_CON37_RXEV_BIT    4U   /* Assert to wake M0 from WFE (or WIC wake) */
+#define GRF_CON37_WICENREQ_BIT 6U  /* Host sets 1 for WIC-based deep sleep (M0 can power down) */
+#define GRF_CON37_WREN(bit)   (1u << (16u + (bit)))
+
+/* Cortex-M0 System Control Block — SLEEPDEEP for WIC deep sleep (full power down). */
+#define SCB_BASE              0xE000ED00U
+#define SCB_SCR               (SCB_BASE + 0x10U)
+#define SCB_SCR_SLEEPDEEP     (1u << 2)
+
 #endif /* RK3506_REGS_H */

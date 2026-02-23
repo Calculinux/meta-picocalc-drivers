@@ -24,10 +24,14 @@ typedef struct {
 	volatile uint32_t sample_rate;
 	volatile uint32_t channels;
 	volatile uint32_t format;
-	uint32_t          _reserved[7];
+	volatile uint32_t flags;   /* M0_SHMEM_FLAG_* */
+	uint32_t          _reserved[6];
 	uint8_t           buffer[];
 } m0_audio_shmem_t;
 
 #define M0_HEADER_SIZE    (64U)
+
+/* flags: set by host when it supports wake via GRF rxev / WIC */
+#define M0_SHMEM_FLAG_WIC_WAKE  (1u << 0)  /* Host set wicenreq and will wake via rxev; M0 may use WFI+SLEEPDEEP */
 
 #endif /* M0_SHMEM_H */

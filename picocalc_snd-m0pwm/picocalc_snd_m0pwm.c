@@ -11,6 +11,7 @@
 #include <linux/platform_device.h>
 #include <linux/remoteproc.h>
 #include <linux/of_reserved_mem.h>
+#include <linux/workqueue.h>
 #include <sound/core.h>
 #include <sound/pcm.h>
 
@@ -35,7 +36,8 @@ struct m0_audio_shmem {
 	volatile uint32_t sample_rate;
 	volatile uint32_t channels;
 	volatile uint32_t format;
-	uint32_t          _reserved[7];
+	volatile uint32_t flags;   /* M0_SHMEM_FLAG_WIC_WAKE etc. */
+	uint32_t          _reserved[6];
 	uint8_t           buffer[];
 };
 
@@ -60,17 +62,45 @@ struct picocalc_m0pwm {
 	uint32_t last_read_idx;
 	uint32_t copied_bytes;
 	bool running;
+	struct work_struct start_work;
+	struct work_struct stop_work;
 };
 
 static struct picocalc_m0pwm *g_m0pwm;
+
+static void m0pwm_start_work(struct work_struct *work)
+{
+	struct picocalc_m0pwm *m = container_of(work, struct picocalc_m0pwm, start_work);
+	unsigned long flags;
+	int ret;
+
+	ret = rproc_boot(m->rproc);
+	if (ret) {
+		dev_err(&m->pdev->dev, "rproc_boot failed: %d\n", ret);
+		return;
+	}
+	spin_lock_irqsave(&m->lock, flags);
+	m->running = true;
+	hrtimer_start(&m->timer, m->period_ktime, HRTIMER_MODE_REL);
+	spin_unlock_irqrestore(&m->lock, flags);
+}
+
+static void m0pwm_stop_work(struct work_struct *work)
+{
+	struct picocalc_m0pwm *m = container_of(work, struct picocalc_m0pwm, stop_work);
+
+	msleep(2);
+	rproc_shutdown(m->rproc);
+}
 
 static enum hrtimer_restart m0pwm_timer_cb(struct hrtimer *t)
 {
 	struct picocalc_m0pwm *m = container_of(t, struct picocalc_m0pwm, timer);
 	struct snd_pcm_substream *ss = m->substream;
 	struct snd_pcm_runtime *runtime;
-	uint32_t read_idx, write_idx, period_bytes, frame_size;
-	uint32_t space, to_copy;
+	uint32_t read_idx, write_idx, period_bytes;
+	uint32_t space, to_copy, buffer_bytes;
+	uint32_t buf_mask, rpos, dma_pos, left, chunk;
 	uint8_t *ring;
 	const uint8_t *dma_area;
 
@@ -82,9 +112,10 @@ static enum hrtimer_restart m0pwm_timer_cb(struct hrtimer *t)
 		return HRTIMER_RESTART;
 
 	period_bytes = m->shmem->period_bytes;
-	frame_size = (runtime->channels * (runtime->format == SNDRV_PCM_FORMAT_S16_LE ? 2 : 1));
+	buffer_bytes = frames_to_bytes(runtime, runtime->buffer_size);
 	ring = (uint8_t *)m->shmem->buffer;
 	dma_area = (const uint8_t *)runtime->dma_area;
+	buf_mask = m->buf_size - 1;
 
 	read_idx = m->shmem->read_idx;
 	write_idx = m->shmem->write_idx;
@@ -98,19 +129,30 @@ static enum hrtimer_restart m0pwm_timer_cb(struct hrtimer *t)
 	to_copy = period_bytes;
 	if (to_copy > space)
 		to_copy = space;
-	if (to_copy > 0 && m->copied_bytes + to_copy <= runtime->buffer_size) {
-		uint32_t i;
-		for (i = 0; i < to_copy; i++) {
-			uint32_t wi = (write_idx + i) % m->buf_size;
-			uint32_t di = (m->copied_bytes + i) % runtime->buffer_size;
-			ring[wi] = dma_area[di];
+	if (to_copy > 0 && m->copied_bytes + to_copy <= buffer_bytes) {
+		rpos = write_idx;
+		dma_pos = m->copied_bytes % buffer_bytes;
+		left = to_copy;
+		while (left > 0) {
+			uint32_t ring_chunk = m->buf_size - rpos;
+			uint32_t dma_chunk = buffer_bytes - dma_pos;
+
+			chunk = left;
+			if (chunk > ring_chunk)
+				chunk = ring_chunk;
+			if (chunk > dma_chunk)
+				chunk = dma_chunk;
+			memcpy(ring + rpos, dma_area + dma_pos, chunk);
+			rpos = (rpos + chunk) & buf_mask;
+			dma_pos = (dma_pos + chunk) % buffer_bytes;
+			left -= chunk;
 		}
-		m->shmem->write_idx = (write_idx + to_copy) % m->buf_size;
+		m->shmem->write_idx = (write_idx + to_copy) & buf_mask;
 		m->copied_bytes += to_copy;
 	}
 
-	/* Period elapsed? */
-	if ((uint32_t)(read_idx - m->last_read_idx) >= period_bytes) {
+	/* Period elapsed? (handle ring wrap with mask) */
+	if (((read_idx - m->last_read_idx) & buf_mask) >= period_bytes) {
 		m->last_read_idx = read_idx;
 		snd_pcm_period_elapsed(ss);
 	}
@@ -193,16 +235,10 @@ static int m0pwm_pcm_trigger(struct snd_pcm_substream *ss, int cmd)
 
 		m->last_read_idx = 0;
 		m->copied_bytes = 0;
-		m->period_ktime = ns_to_ktime(NSEC_PER_SEC / runtime->rate);
-		m->running = true;
+		/* Fire once per ALSA period, not per sample */
+		m->period_ktime = ns_to_ktime((u64)NSEC_PER_SEC * runtime->period_size / runtime->rate);
 
-		ret = rproc_boot(m->rproc);
-		if (ret) {
-			m->running = false;
-			dev_err(&m->pdev->dev, "rproc_boot failed: %d\n", ret);
-			break;
-		}
-		hrtimer_start(&m->timer, m->period_ktime, HRTIMER_MODE_REL);
+		schedule_work(&m->start_work);
 		break;
 
 	case SNDRV_PCM_TRIGGER_STOP:
@@ -212,10 +248,8 @@ static int m0pwm_pcm_trigger(struct snd_pcm_substream *ss, int cmd)
 		hrtimer_cancel(&m->timer);
 		m->shmem->ctrl = M0_CTRL_STOP;
 		spin_unlock_irqrestore(&m->lock, flags);
-		msleep(2);
-		rproc_shutdown(m->rproc);
-		spin_lock_irqsave(&m->lock, flags);
-		break;
+		schedule_work(&m->stop_work);
+		return 0;
 	default:
 		ret = -EINVAL;
 	}
@@ -227,10 +261,12 @@ static snd_pcm_uframes_t m0pwm_pcm_pointer(struct snd_pcm_substream *ss)
 {
 	struct picocalc_m0pwm *m = snd_pcm_substream_chip(ss);
 	struct snd_pcm_runtime *runtime = ss->runtime;
-	uint32_t read_idx = m->shmem->read_idx;
 	unsigned int frame_size = frames_to_bytes(runtime, 1);
+	snd_pcm_uframes_t consumed_frames;
 
-	return read_idx / frame_size;
+	/* Position in ALSA buffer = bytes consumed (handed to M0 ring) in frames, modulo buffer */
+	consumed_frames = m->copied_bytes / frame_size;
+	return consumed_frames % runtime->buffer_size;
 }
 
 static const struct snd_pcm_ops m0pwm_pcm_ops = {
@@ -260,6 +296,8 @@ static int m0pwm_probe(struct platform_device *pdev)
 
 	m->pdev = pdev;
 	spin_lock_init(&m->lock);
+	INIT_WORK(&m->start_work, m0pwm_start_work);
+	INIT_WORK(&m->stop_work, m0pwm_stop_work);
 	hrtimer_init(&m->timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
 	m->timer.function = m0pwm_timer_cb;
 
@@ -349,6 +387,8 @@ static int m0pwm_remove(struct platform_device *pdev)
 	if (!m)
 		return 0;
 	g_m0pwm = NULL;
+	cancel_work_sync(&m->start_work);
+	cancel_work_sync(&m->stop_work);
 	hrtimer_cancel(&m->timer);
 	if (m->running) {
 		m->shmem->ctrl = M0_CTRL_STOP;
@@ -372,6 +412,6 @@ static struct platform_driver picocalc_snd_m0pwm_driver = {
 
 module_platform_driver(picocalc_snd_m0pwm_driver);
 
-MODULE_AUTHOR("PicoCalc");
+MODULE_AUTHOR("Ben Klopfenstein");
 MODULE_DESCRIPTION("PicoCalc M0 delta-sigma audio driver");
 MODULE_LICENSE("GPL v2");

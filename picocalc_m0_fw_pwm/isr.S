@@ -2,7 +2,7 @@
 /* Hand-tuned TIMER0_CH5 ISR: load-order scheduling to avoid load-use stalls on Cortex-M0.
  *
  * HIGH-LEVEL BEHAVIOUR:
- *   This ISR runs at ~2 MHz (TIMER0_CH5). Each tick it:
+ *   This ISR runs at ~1 MHz (TIMER0_CH5, DS_PERIOD_TICKS=100). Each tick it:
  *   1. Clears the timer interrupt and advances a phase accumulator (phase += rate).
  *   2. When phase >= DS_RATE, "consumes" one stereo sample from the host ring buffer:
  *      reads next L/R 16-bit sample, updates last_l/last_r, increments read_idx, and
@@ -76,7 +76,7 @@ TIMER0_CH5_IRQHandler:
 	adds    r1, r1, r0                   @ 1  phase += rate
 	ldr     r0, [r5, #O_DSRATE]         @ 2  Threshold
 	cmp     r1, r0                       @ 1  if (phase < DS_RATE) skip consume
-	bls     .L_no_consume                @ 2
+	blo     .L_no_consume                @ 2
 
 	/* CONSUME: phase -= DS_RATE, then read next L/R from ring buffer.
 	 * Buffer: int16_t left, int16_t right; read_idx in bytes, +=4, wrap with mask. */
@@ -131,9 +131,8 @@ TIMER0_CH5_IRQHandler:
 	subs    r1, r1, r4                   @ 1  integ1_new
 	str     r1, [r5, #O_I1L]             @ 2
 	adds    r2, r2, r1                   @ 1  integ2 += integ1_new
-	asrs    r4, r2, #31                  @ 1  sign(integ2) in {-1,0}
-	movs    r0, #1                       @ 1
-	subs    r4, r0, r4                   @ 1  out_new = 1 or 0 (1 if integ2>=0)
+	asrs    r4, r2, #31                  @ 1  sign(integ2): -1 or 0
+	adds    r4, r4, #1                   @ 1  out_new = 0 or 1 (1 if integ2>=0)
 	ldr     r0, [r5, #O_FULL]           @ 2  FULL (32768)
 	adds    r2, r2, r0                   @ 1  integ2 += full
 	lsls    r0, r4, #16                  @ 1  out_new << 16 (feedback)
@@ -153,9 +152,8 @@ TIMER0_CH5_IRQHandler:
 	subs    r1, r1, r4                   @ 1  integ1_new
 	str     r1, [r5, #O_I1R]             @ 2
 	adds    r2, r2, r1                   @ 1  integ2 += integ1_new
-	asrs    r4, r2, #31                  @ 1  sign(integ2)
-	movs    r0, #1                       @ 1
-	subs    r4, r0, r4                   @ 1  out_new
+	asrs    r4, r2, #31                  @ 1  sign(integ2): -1 or 0
+	adds    r4, r4, #1                   @ 1  out_new = 0 or 1
 	ldr     r0, [r5, #O_FULL]           @ 2
 	adds    r2, r2, r0                   @ 1  integ2 += full
 	lsls    r0, r4, #16                  @ 1

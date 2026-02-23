@@ -139,7 +139,7 @@
 		status = "okay";
 		memory-region = <&m0_shmem>;
 		remote-proc = <&mcu_rproc>;
-		ring-buffer-bytes = <16384>;
+		ring-buffer-bytes = <8192>;
 		pinctrl-names = "default";
 		pinctrl-0 = <&snd_pins>;
 	};

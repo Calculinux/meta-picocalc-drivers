@@ -1,27 +1,20 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /* M0 delta-sigma audio: single TIMER0_CH5 ISR drives both GPIO4_B2 (L) and B3 (R).
- * Power saving: WFI when idle, SysTick wakes to poll shmem (no host→M0 IRQ);
- * optional clock gating when not playing. */
+ * Power saving: WFE when idle; host must wake M0 via GRF rxev (TRM GRF_SOC_CON37 bit 4).
+ * Optional WIC deep sleep: if host sets M0_SHMEM_FLAG_WIC_WAKE and grf_con_mcu_wicenreq
+ * (CON37 bit 6), M0 uses WFI+SLEEPDEEP so it can fully power down; host asserts rxev
+ * to wake. See RK3506 TRM Part 1 §4.6 (M0 status signals), GRF_SOC_CON37. */
 
 #include "rk3506_regs.h"
 #include "shmem.h"
 
 #define REG(addr)   (*(volatile uint32_t *)(addr))
 
-/* Idle polling: SysTick period (ms). WFI until SysTick fires, then re-check shmem. */
-#define M0_IDLE_POLL_MS   10U
-/* M0 core clock (Hz) for SysTick reload. Adjust if core runs at a different rate. */
-#define M0_CPU_HZ         200000000U
-
-/* Cortex-M SysTick (ARM standard, base 0xE000E010) — used only when idle for WFI wake. */
-#define SYSTICK_BASE      0xE000E010U
-#define SYSTICK_CSR       (SYSTICK_BASE + 0x00U)
-#define SYSTICK_RVR       (SYSTICK_BASE + 0x04U)
-#define SYSTICK_CVR       (SYSTICK_BASE + 0x08U)
-#define SYSTICK_CSR_ENABLE   (1u << 0)
-#define SYSTICK_CSR_TICKINT  (1u << 1)
-#define SYSTICK_CSR_CLKSOURCE (1u << 2)  /* 1 = processor clock */
+/* Host driver must assert GRF rxev to wake M0: write GRF_SOC_CON37 (GRF_BASE+0x94) with
+ * (GRF_CON37_WREN(GRF_CON37_RXEV_BIT) | (1u<<GRF_CON37_RXEV_BIT)), then clear rxev.
+ * For WIC deep sleep set CON37 bit 6 (wicenreq) and shmem->flags M0_SHMEM_FLAG_WIC_WAKE. */
 #define __WFI()            __asm volatile ("wfi")
+#define __WFE()            __asm volatile ("wfe")
 
 /*
  * Fixed config: fewer memory loads in the ISR and no format/sample-rate logic.
@@ -126,31 +119,6 @@ __attribute__((always_inline)) static inline void consume_s16_stereo(int32_t *s3
 /* Hand-tuned asm ISR: load-order scheduling to avoid stalls, minimal push/pop. */
 void TIMER0_CH5_IRQHandler(void);
 
-/* Set by SysTick when idle; wakes CPU from WFI so we re-poll shmem. No host→M0 IRQ. */
-static volatile uint32_t systick_wake_flag;
-
-void SysTick_Handler(void)
-{
-	systick_wake_flag = 1;
-}
-
-static void systick_start_idle(void)
-{
-	/* Reload value for M0_IDLE_POLL_MS; SysTick fires every (RVR+1) cycles. */
-	uint32_t rvr = (M0_CPU_HZ / 1000U) * M0_IDLE_POLL_MS;
-	if (rvr > 0x00FFFFFFU)
-		rvr = 0x00FFFFFFU;
-	REG(SYSTICK_RVR) = rvr - 1U;
-	REG(SYSTICK_CVR) = 0U;
-	systick_wake_flag = 0;
-	REG(SYSTICK_CSR) = SYSTICK_CSR_ENABLE | SYSTICK_CSR_TICKINT | SYSTICK_CSR_CLKSOURCE;
-}
-
-static void systick_stop_idle(void)
-{
-	REG(SYSTICK_CSR) = 0U;
-}
-
 static void nvic_enable_timer5(void)
 {
 	/* NVIC_ISER0: set bit 19 to enable IRQ 19 */
@@ -203,12 +171,17 @@ int main(void)
 	for (;;) {
 		m0_audio_shmem_t *shmem = (m0_audio_shmem_t *)m0_isr_globs.shmem_base;
 
-		systick_start_idle();
 		while (shmem->magic != M0_AUDIO_MAGIC)
-			__WFI();
-		while (shmem->ctrl != M0_CTRL_PLAY)
-			__WFI();
-		systick_stop_idle();
+			__WFE();
+		if (shmem->flags & M0_SHMEM_FLAG_WIC_WAKE) {
+			REG(SCB_SCR) = SCB_SCR_SLEEPDEEP;
+			while (shmem->ctrl != M0_CTRL_PLAY)
+				__WFI();
+			REG(SCB_SCR) = 0;
+		} else {
+			while (shmem->ctrl != M0_CTRL_PLAY)
+				__WFE();
+		}
 
 		clocks_ungate_play();
 		m0_isr_globs.buf_ptr = (uint32_t)shmem->buffer;
