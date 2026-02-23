@@ -10,7 +10,7 @@
 #include <linux/of.h>
 #include <linux/platform_device.h>
 #include <linux/remoteproc.h>
-#include <linux/reserved_mem.h>
+#include <linux/of_reserved_mem.h>
 #include <sound/core.h>
 #include <sound/pcm.h>
 
