@@ -5,6 +5,7 @@
  */
 
 #include <asm/barrier.h>
+#include <asm/div64.h>
 #include <linux/delay.h>
 #include <linux/hrtimer.h>
 #include <linux/io.h>
@@ -251,8 +252,12 @@ static int m0_pcm_trigger(struct snd_pcm_substream *ss, int cmd)
 
 		m->last_read_idx = 0;
 		m->copied_bytes = 0;
-		/* Fire once per ALSA period, not per sample */
-		m->period_ktime = ns_to_ktime((u64)NSEC_PER_SEC * runtime->period_size / runtime->rate);
+		/* Fire once per ALSA period, not per sample (do_div avoids __aeabi_uldivmod on 32-bit ARM) */
+		{
+			u64 nsec = (u64)NSEC_PER_SEC * runtime->period_size;
+			do_div(nsec, runtime->rate);
+			m->period_ktime = ns_to_ktime(nsec);
+		}
 
 		schedule_work(&m->start_work);
 		break;
