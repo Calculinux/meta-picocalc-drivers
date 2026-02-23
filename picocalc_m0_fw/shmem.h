@@ -4,9 +4,9 @@
 #ifndef M0_SHMEM_H
 #define M0_SHMEM_H
 
-#include "stdint.h"
+#include <stdint.h>
 
-#define M0_AUDIO_MAGIC    0x4D305057U  /* "M0PW" */
+#define M0_AUDIO_MAGIC    0x4D304431U  /* "M0D1" M0 audio */
 #define M0_CTRL_PLAY      (1u << 0)
 #define M0_CTRL_STOP      0u
 #define M0_FMT_U8         0

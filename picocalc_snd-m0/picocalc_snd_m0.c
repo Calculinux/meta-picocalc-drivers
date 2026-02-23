@@ -4,7 +4,9 @@
  * Uses RK3506 Cortex-M0 core to drive GPIO4_B2/B3 from shared memory ring buffer.
  */
 
+#include <asm/barrier.h>
 #include <linux/hrtimer.h>
+#include <linux/io.h>
 #include <linux/ktime.h>
 #include <linux/module.h>
 #include <linux/of.h>
@@ -15,8 +17,8 @@
 #include <sound/core.h>
 #include <sound/pcm.h>
 
-/* Must match picocalc_m0_fw_pwm/shmem.h and main.c fixed config */
-#define M0_AUDIO_MAGIC    0x4D305057U
+/* Must match picocalc_m0_fw/shmem.h and main.c fixed config */
+#define M0_AUDIO_MAGIC    0x4D304431U
 #define M0_CTRL_PLAY      (1u << 0)
 #define M0_CTRL_STOP      0u
 #define M0_FMT_U8         0
@@ -41,19 +43,19 @@ struct m0_audio_shmem {
 	uint8_t           buffer[];
 };
 
-static const struct of_device_id picocalc_snd_m0pwm_dt_ids[] = {
-	{ .compatible = "picocalc,snd-m0pwm", },
+static const struct of_device_id picocalc_snd_m0_dt_ids[] = {
+	{ .compatible = "picocalc,snd-m0", },
 	{ }
 };
-MODULE_DEVICE_TABLE(of, picocalc_snd_m0pwm_dt_ids);
+MODULE_DEVICE_TABLE(of, picocalc_snd_m0_dt_ids);
 
-struct picocalc_m0pwm {
+struct picocalc_m0 {
 	struct platform_device *pdev;
 	struct snd_card *card;
 	struct snd_pcm_substream *substream;
 	struct rproc *rproc;
 	struct m0_audio_shmem *shmem;
-	void __iomem *shmem_io;
+	void *shmem_virt;  /* WB-mapped for fast ring buffer access */
 	size_t shmem_size;
 	uint32_t buf_size;
 	spinlock_t lock;
@@ -66,11 +68,20 @@ struct picocalc_m0pwm {
 	struct work_struct stop_work;
 };
 
-static struct picocalc_m0pwm *g_m0pwm;
+static struct picocalc_m0 *g_m0;
 
-static void m0pwm_start_work(struct work_struct *work)
+/*
+ * Power management (M0-side WFE idle and optional WIC deep sleep) is currently
+ * unreachable: we always rproc_boot() on start and rproc_shutdown() on stop,
+ * so the M0 is reloaded from ELF each time and never sits in WFE between
+ * play cycles. To use the M0 power paths (and avoid boot/shutdown latency),
+ * a future phase could: (a) boot M0 once at probe or first play and keep it
+ * running, (b) ioremap the GRF region, (c) assert rxev to wake M0 from WFE/WFI
+ * before setting ctrl=PLAY, (d) clear rxev after wake.
+ */
+static void m0_start_work(struct work_struct *work)
 {
-	struct picocalc_m0pwm *m = container_of(work, struct picocalc_m0pwm, start_work);
+	struct picocalc_m0 *m = container_of(work, struct picocalc_m0, start_work);
 	unsigned long flags;
 	int ret;
 
@@ -85,17 +96,17 @@ static void m0pwm_start_work(struct work_struct *work)
 	spin_unlock_irqrestore(&m->lock, flags);
 }
 
-static void m0pwm_stop_work(struct work_struct *work)
+static void m0_stop_work(struct work_struct *work)
 {
-	struct picocalc_m0pwm *m = container_of(work, struct picocalc_m0pwm, stop_work);
+	struct picocalc_m0 *m = container_of(work, struct picocalc_m0, stop_work);
 
 	msleep(2);
 	rproc_shutdown(m->rproc);
 }
 
-static enum hrtimer_restart m0pwm_timer_cb(struct hrtimer *t)
+static enum hrtimer_restart m0_timer_cb(struct hrtimer *t)
 {
-	struct picocalc_m0pwm *m = container_of(t, struct picocalc_m0pwm, timer);
+	struct picocalc_m0 *m = container_of(t, struct picocalc_m0, timer);
 	struct snd_pcm_substream *ss = m->substream;
 	struct snd_pcm_runtime *runtime;
 	uint32_t read_idx, write_idx, period_bytes;
@@ -147,6 +158,7 @@ static enum hrtimer_restart m0pwm_timer_cb(struct hrtimer *t)
 			dma_pos = (dma_pos + chunk) % buffer_bytes;
 			left -= chunk;
 		}
+		dma_wmb(); /* ensure ring data visible to M0 before updating write_idx */
 		m->shmem->write_idx = (write_idx + to_copy) & buf_mask;
 		m->copied_bytes += to_copy;
 	}
@@ -161,9 +173,9 @@ static enum hrtimer_restart m0pwm_timer_cb(struct hrtimer *t)
 	return HRTIMER_RESTART;
 }
 
-static int m0pwm_pcm_open(struct snd_pcm_substream *ss)
+static int m0_pcm_open(struct snd_pcm_substream *ss)
 {
-	struct picocalc_m0pwm *m = snd_pcm_substream_chip(ss);
+	struct picocalc_m0 *m = snd_pcm_substream_chip(ss);
 
 	/* Fixed config: M0 firmware is 48 kHz S16 LE stereo only; ALSA SRC handles other rates */
 	ss->runtime->hw = (struct snd_pcm_hardware){
@@ -185,33 +197,33 @@ static int m0pwm_pcm_open(struct snd_pcm_substream *ss)
 	return 0;
 }
 
-static int m0pwm_pcm_close(struct snd_pcm_substream *ss)
+static int m0_pcm_close(struct snd_pcm_substream *ss)
 {
-	struct picocalc_m0pwm *m = snd_pcm_substream_chip(ss);
+	struct picocalc_m0 *m = snd_pcm_substream_chip(ss);
 
 	m->substream = NULL;
 	return 0;
 }
 
-static int m0pwm_pcm_hw_params(struct snd_pcm_substream *ss,
-			       struct snd_pcm_hw_params *hw_params)
+static int m0_pcm_hw_params(struct snd_pcm_substream *ss,
+			    struct snd_pcm_hw_params *hw_params)
 {
 	return snd_pcm_lib_malloc_pages(ss, params_buffer_bytes(hw_params));
 }
 
-static int m0pwm_pcm_hw_free(struct snd_pcm_substream *ss)
+static int m0_pcm_hw_free(struct snd_pcm_substream *ss)
 {
 	return snd_pcm_lib_free_pages(ss);
 }
 
-static int m0pwm_pcm_prepare(struct snd_pcm_substream *ss)
+static int m0_pcm_prepare(struct snd_pcm_substream *ss)
 {
 	return 0;
 }
 
-static int m0pwm_pcm_trigger(struct snd_pcm_substream *ss, int cmd)
+static int m0_pcm_trigger(struct snd_pcm_substream *ss, int cmd)
 {
-	struct picocalc_m0pwm *m = snd_pcm_substream_chip(ss);
+	struct picocalc_m0 *m = snd_pcm_substream_chip(ss);
 	struct snd_pcm_runtime *runtime = ss->runtime;
 	unsigned long flags;
 	int ret = 0;
@@ -232,6 +244,7 @@ static int m0pwm_pcm_trigger(struct snd_pcm_substream *ss, int cmd)
 		m->shmem->sample_rate = M0_FIXED_SAMPLE_RATE_HZ;
 		m->shmem->channels = 2;
 		m->shmem->format = M0_FMT_S16_LE;
+		dma_wmb(); /* ensure header visible to M0 before it sees ctrl/indices */
 
 		m->last_read_idx = 0;
 		m->copied_bytes = 0;
@@ -257,9 +270,9 @@ static int m0pwm_pcm_trigger(struct snd_pcm_substream *ss, int cmd)
 	return ret;
 }
 
-static snd_pcm_uframes_t m0pwm_pcm_pointer(struct snd_pcm_substream *ss)
+static snd_pcm_uframes_t m0_pcm_pointer(struct snd_pcm_substream *ss)
 {
-	struct picocalc_m0pwm *m = snd_pcm_substream_chip(ss);
+	struct picocalc_m0 *m = snd_pcm_substream_chip(ss);
 	struct snd_pcm_runtime *runtime = ss->runtime;
 	unsigned int frame_size = frames_to_bytes(runtime, 1);
 	snd_pcm_uframes_t consumed_frames;
@@ -269,22 +282,22 @@ static snd_pcm_uframes_t m0pwm_pcm_pointer(struct snd_pcm_substream *ss)
 	return consumed_frames % runtime->buffer_size;
 }
 
-static const struct snd_pcm_ops m0pwm_pcm_ops = {
-	.open    = m0pwm_pcm_open,
-	.close   = m0pwm_pcm_close,
+static const struct snd_pcm_ops m0_pcm_ops = {
+	.open    = m0_pcm_open,
+	.close   = m0_pcm_close,
 	.ioctl   = snd_pcm_lib_ioctl,
-	.hw_params = m0pwm_pcm_hw_params,
-	.hw_free = m0pwm_pcm_hw_free,
-	.prepare = m0pwm_pcm_prepare,
-	.trigger = m0pwm_pcm_trigger,
-	.pointer = m0pwm_pcm_pointer,
+	.hw_params = m0_pcm_hw_params,
+	.hw_free = m0_pcm_hw_free,
+	.prepare = m0_pcm_prepare,
+	.trigger = m0_pcm_trigger,
+	.pointer = m0_pcm_pointer,
 };
 
-static int m0pwm_probe(struct platform_device *pdev)
+static int m0_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
 	struct device_node *np = dev->of_node;
-	struct picocalc_m0pwm *m;
+	struct picocalc_m0 *m;
 	struct reserved_mem *rmem;
 	struct device_node *rproc_np;
 	struct device_node *mem_np;
@@ -296,10 +309,10 @@ static int m0pwm_probe(struct platform_device *pdev)
 
 	m->pdev = pdev;
 	spin_lock_init(&m->lock);
-	INIT_WORK(&m->start_work, m0pwm_start_work);
-	INIT_WORK(&m->stop_work, m0pwm_stop_work);
+	INIT_WORK(&m->start_work, m0_start_work);
+	INIT_WORK(&m->stop_work, m0_stop_work);
 	hrtimer_init(&m->timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
-	m->timer.function = m0pwm_timer_cb;
+	m->timer.function = m0_timer_cb;
 
 	rproc_np = of_parse_phandle(np, "remote-proc", 0);
 	if (!rproc_np) {
@@ -327,25 +340,25 @@ static int m0pwm_probe(struct platform_device *pdev)
 		goto put_rproc;
 	}
 	m->shmem_size = rmem->size;
-	m->shmem_io = ioremap(rmem->base, rmem->size);
-	if (!m->shmem_io) {
+	m->shmem_virt = memremap(rmem->base, rmem->size, MEMREMAP_WB);
+	if (!m->shmem_virt) {
 		ret = -ENOMEM;
 		goto put_rproc;
 	}
-	m->shmem = (struct m0_audio_shmem *)m->shmem_io;
+	m->shmem = (struct m0_audio_shmem *)m->shmem_virt;
 
 	if (of_property_read_u32(np, "ring-buffer-bytes", &m->buf_size))
 		m->buf_size = M0_FIXED_BUF_SIZE;
 	if (m->buf_size != M0_FIXED_BUF_SIZE || m->buf_size > m->shmem_size - M0_HEADER_SIZE)
 		m->buf_size = M0_FIXED_BUF_SIZE;
 
-	ret = snd_card_new(dev, SNDRV_DEFAULT_IDX1, "picocalc-m0pwm",
+	ret = snd_card_new(dev, SNDRV_DEFAULT_IDX1, "picocalc-m0",
 			   THIS_MODULE, 0, &m->card);
 	if (ret < 0)
-		goto iounmap;
+		goto memunmap;
 
 	m->card->private_data = m;
-	strscpy(m->card->driver, "picocalc-snd-m0pwm", sizeof(m->card->driver));
+	strscpy(m->card->driver, "picocalc-snd-m0", sizeof(m->card->driver));
 	strscpy(m->card->shortname, "PicoCalc M0 Audio", sizeof(m->card->shortname));
 	strscpy(m->card->longname, "PicoCalc M0 delta-sigma audio", sizeof(m->card->longname));
 
@@ -354,7 +367,7 @@ static int m0pwm_probe(struct platform_device *pdev)
 		ret = snd_pcm_new(m->card, "M0 PCM", 0, 1, 0, &pcm);
 		if (ret < 0)
 			goto card_free;
-		snd_pcm_set_ops(pcm, SNDRV_PCM_STREAM_PLAYBACK, &m0pwm_pcm_ops);
+		snd_pcm_set_ops(pcm, SNDRV_PCM_STREAM_PLAYBACK, &m0_pcm_ops);
 		snd_pcm_set_drvdata(pcm, m);
 		strscpy(pcm->name, "M0 DAC", sizeof(pcm->name));
 		snd_pcm_lib_preallocate_pages_for_all(pcm,
@@ -367,26 +380,26 @@ static int m0pwm_probe(struct platform_device *pdev)
 		goto card_free;
 
 	platform_set_drvdata(pdev, m);
-	g_m0pwm = m;
+	g_m0 = m;
 	dev_info(dev, "PicoCalc M0 audio registered (ring %u bytes)\n", m->buf_size);
 	return 0;
 
 card_free:
 	snd_card_free(m->card);
-iounmap:
-	iounmap(m->shmem_io);
+memunmap:
+	memunmap(m->shmem_virt);
 put_rproc:
 	rproc_put(m->rproc);
 	return ret;
 }
 
-static int m0pwm_remove(struct platform_device *pdev)
+static int m0_remove(struct platform_device *pdev)
 {
-	struct picocalc_m0pwm *m = platform_get_drvdata(pdev);
+	struct picocalc_m0 *m = platform_get_drvdata(pdev);
 
 	if (!m)
 		return 0;
-	g_m0pwm = NULL;
+	g_m0 = NULL;
 	cancel_work_sync(&m->start_work);
 	cancel_work_sync(&m->stop_work);
 	hrtimer_cancel(&m->timer);
@@ -396,21 +409,21 @@ static int m0pwm_remove(struct platform_device *pdev)
 		rproc_shutdown(m->rproc);
 	}
 	snd_card_free(m->card);
-	iounmap(m->shmem_io);
+	memunmap(m->shmem_virt);
 	rproc_put(m->rproc);
 	return 0;
 }
 
-static struct platform_driver picocalc_snd_m0pwm_driver = {
+static struct platform_driver picocalc_snd_m0_driver = {
 	.driver = {
-		.name = "picocalc-snd-m0pwm",
-		.of_match_table = picocalc_snd_m0pwm_dt_ids,
+		.name = "picocalc-snd-m0",
+		.of_match_table = picocalc_snd_m0_dt_ids,
 	},
-	.probe = m0pwm_probe,
-	.remove = m0pwm_remove,
+	.probe = m0_probe,
+	.remove = m0_remove,
 };
 
-module_platform_driver(picocalc_snd_m0pwm_driver);
+module_platform_driver(picocalc_snd_m0_driver);
 
 MODULE_AUTHOR("Ben Klopfenstein");
 MODULE_DESCRIPTION("PicoCalc M0 delta-sigma audio driver");

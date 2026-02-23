@@ -4,7 +4,7 @@
 #ifndef RK3506_REGS_H
 #define RK3506_REGS_H
 
-#include "stdint.h"
+#include <stdint.h>
 
 /* GPIO4 — bit-bang output (GPIO4_B2 = left, GPIO4_B3 = right) */
 #define GPIO4_BASE        0xFF1E0000U

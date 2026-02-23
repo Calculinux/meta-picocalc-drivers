@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-2.0
 # PicoCalc M0 delta-sigma audio (ALSA)
 
-obj-m += picocalc_snd_m0pwm.o
+obj-m += picocalc_snd_m0.o
 
 KERNEL_SRC ?= /lib/modules/$(shell uname -r)/build
 

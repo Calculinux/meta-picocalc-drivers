@@ -156,12 +156,16 @@ static void clocks_ungate_play(void)
 	REG(CRU_BASE + CRU_GATE_CON13) = CRU_GPIO4_EN;
 }
 
-/* Gate TIMER5/GPIO4 clocks when idle to save power. Optional: set values per TRM. */
+/*
+ * Gate TIMER5/GPIO4 clocks when idle to save power. Intentionally a stub:
+ * with the current Linux integration we always rproc_shutdown() on stop, so
+ * the M0 is never kept alive between play cycles and this path has no effect.
+ * If we move to a "keep M0 alive" model, implement actual gate-disable values
+ * per TRM for CRU_GATE_CON06 / CRU_GATE_CON13; those registers may be shared
+ * with other peripherals — use read-modify-write if needed.
+ */
 static void clocks_gate_idle(void)
 {
-	/* If TRM defines disable values for CRU_GATE_CON06 / CRU_GATE_CON13 (e.g. write-enable
-	 * plus clear gate bit), add REG(CRU_BASE + ...) = value here. Same register may control
-	 * other peripherals — use read-modify-write if needed. */
 }
 
 int main(void)
@@ -196,7 +200,7 @@ int main(void)
 		nvic_enable_timer5();
 		timer5_start();
 		while (shmem->ctrl == M0_CTRL_PLAY)
-			;
+			__WFE();
 		timer5_stop();
 		REG(TIMER0_CH5_BASE + TIMER_INTSTAT) = 1; /* clear any pending IRQ before masking */
 		nvic_disable_timer5();

@@ -37,6 +37,19 @@ __vectors:
 Reset_Handler:
 	ldr	r0, =_stack_top
 	mov	sp, r0
+
+	/* Zero .bss (uninitialized globals) */
+	ldr	r0, =_sbss
+	ldr	r1, =_ebss
+	movs	r2, #0
+.Lbss_loop:
+	cmp	r0, r1
+	bge	.Lbss_done
+	str	r2, [r0]
+	adds	r0, #4
+	b	.Lbss_loop
+.Lbss_done:
+
 	bl	main
 	b	.
 

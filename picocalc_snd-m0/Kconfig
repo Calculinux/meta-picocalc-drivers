@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0
-config PICOCALC_SND_M0PWM
+config PICOCALC_SND_M0
 	tristate "PicoCalc M0 delta-sigma audio support"
 	depends on STAGING_PICOCALC && REMOTEPROC
 	help

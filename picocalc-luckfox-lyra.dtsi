@@ -134,8 +134,8 @@
 
 / {
 	/* Default sound: M0 delta-sigma audio (same pins as softpwm/hwpwm) */
-	picocalc_snd_m0pwm: picocalc-snd-m0pwm {
-		compatible = "picocalc,snd-m0pwm";
+	picocalc_snd_m0: picocalc-snd-m0 {
+		compatible = "picocalc,snd-m0";
 		status = "okay";
 		memory-region = <&m0_shmem>;
 		remote-proc = <&mcu_rproc>;
