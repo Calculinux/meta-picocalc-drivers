@@ -42,9 +42,31 @@
 #define CRU_GPIO4_EN      0x000C0000U
 #define CRU_TIMER5_100M   0x01C00040U
 
-/* Delta-sigma: 100 MHz clock, 50 ticks = 2 MHz */
-#define DS_PERIOD_TICKS   50U
-#define DS_RATE_HZ        2000000U
+/* Delta-sigma: 1-bit modulator, 48 kHz sample rate. Effective resolution (ENOB) from
+ * oversampling: ENOB ≈ 1 + 2.5*log2(OSR) with OSR = ISR/48000. 100 MHz timer clock.
+ * CPU cycles @200 MHz = 2 * period_ticks (one tick = 10 ns, one CPU cycle = 5 ns).
+ *
+ *   ENOB (bits) │  OSR   │   ISR (Hz)    │ period (ticks) │ cy @200M │ note
+ *   ────────────┼────────┼───────────────┼────────────────┼──────────┼────────────────────
+ *       14.5    │  42.2  │   2 026 531   │      49        │    98    │ 50 ticks = 2 MHz
+ *       14.0    │  36.8  │   1 764 523   │      57        │   114    │
+ *       13.5    │  32.0  │   1 536 000   │      65        │   130    │
+ *       13.0    │  27.9  │   1 337 269   │      75        │   150    │
+ *       12.5    │  24.3  │   1 164 048   │      86        │   172    │
+ *       12.0    │  21.1  │   1 013 269   │      99        │   198    │
+ *       11.5    │  18.4  │     882 257   │     113        │   226    │
+ *       11.0    │  16.0  │     768 000   │     130        │   260    │
+ *       10.5    │  13.9  │     668 497   │     150        │   300    │
+ *       10.0    │  12.1  │     582 084   │     172        │   344    │
+ *        9.5    │  10.6  │     506 876   │     197        │   394    │
+ *        9.0    │   9.2  │     441 128   │     227        │   454    │
+ *        8.5    │   8.0  │     384 000   │     261        │   522    │
+ *        8.0    │   7.0  │     334 061   │     299        │   598    │
+ *
+ * Current: 100 ticks = 1 MHz ISR → ~12 bits (200 cy @200M).*/
+
+#define DS_PERIOD_TICKS   100U
+#define DS_RATE_HZ        1000000U
 #define DSM_FULL_SCALE    32768
 #define DSM_HALF_SCALE    16384
 
