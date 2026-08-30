@@ -2,6 +2,7 @@ cru
 gpio3
 gpio4
 i2c2
+m0_shmem
 pcfg_pull_down
 pcfg_pull_none
 pinctrl

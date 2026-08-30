@@ -24,7 +24,11 @@
 
 set -euo pipefail
 
-OVERLAY_DIRS=("${@:-overlays luckfox-lyra/overlays}")
+if [ $# -gt 0 ]; then
+    OVERLAY_DIRS=("$@")
+else
+    OVERLAY_DIRS=(overlays luckfox-lyra/overlays)
+fi
 
 # Gather overlay sources from all directories
 OVERLAYS=()

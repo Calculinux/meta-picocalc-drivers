@@ -48,9 +48,10 @@ install:
 	done
 
 # --- Device tree overlay symbol whitelist ---
-# Scans all *-overlay.dts files (generic + luckfox-lyra), extracts the base-DTB
-# phandle labels they reference, and writes them to overlay-symbols.txt.
-# The Yocto kernel recipe reads this file to inject only the needed __symbols__ into the DTB.
+# Scans overlays/ and luckfox-lyra/overlays/, extracts the base-DTB phandle
+# labels they reference, and writes them to overlays/overlay-symbols.txt.
+# The Yocto picocalc-devicetree recipe installs this file; the kernel recipe
+# reads it to inject only the needed __symbols__ into the compact DTB.
 
 OVERLAY_SYMBOLS_FILE := overlays/overlay-symbols.txt
 OVERLAY_DIRS := overlays luckfox-lyra/overlays
