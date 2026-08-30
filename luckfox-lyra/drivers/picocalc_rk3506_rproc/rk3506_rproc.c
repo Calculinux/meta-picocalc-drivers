@@ -49,9 +49,6 @@ extern struct resource_table *rproc_elf_find_loaded_rsc_table(struct rproc *rpro
 #define RK3506_MCU_TCM_ADDR 0xFFF84000
 #define RK3506_MCU_TCM_SIZE 0x8000
 
-#define RK3506_MCU_SHMEM_ADDR 0x03C00000
-#define RK3506_MCU_SHMEM_SIZE 0x100000
-
 #define RK3506_PMU_BASE 0xFF900000
 #define RK3506_CRU_BASE 0xFF9A0000
 #define RK3506_GRF_BASE 0xFF288000
@@ -68,7 +65,6 @@ typedef struct {
 	uint8_t *regs_PMU;
 	uint8_t *regs_CRU;
 	uint8_t *regs_GRF;
-	uint8_t *shmem_virt;
 	struct platform_device *pdev;
 } rk3506_mcu_t;
 
@@ -139,11 +135,10 @@ static void *my_da_to_va(struct rproc *rproc, u64 da, size_t len, bool *is_iomem
 	rk3506_mcu_t *mcu = rproc->priv;
 	void __iomem *va;
 
-	/* TCM at 0xFFF84000, size 0x8000; ELF may use 0xFFF88000 (second half) */
+	/* TCM at 0xFFF84000, size 0x8000; ELF may use 0xFFF88000 (second half).
+	 * Audio shmem at 0x03C00000 is mapped only by picocalc_snd_m0 (WC). */
 	if (da >= RK3506_MCU_TCM_ADDR && (da + len) <= (RK3506_MCU_TCM_ADDR + RK3506_MCU_TCM_SIZE)) {
 		va = mcu->tcm_virt + (da - RK3506_MCU_TCM_ADDR);
-	} else if (da >= RK3506_MCU_SHMEM_ADDR && (da + len) <= (RK3506_MCU_SHMEM_ADDR + RK3506_MCU_SHMEM_SIZE)) {
-		va = mcu->shmem_virt + (da - RK3506_MCU_SHMEM_ADDR);
 	} else {
 		dev_err(&rproc->dev, "Invalid rproc address: 0x%08llX, len=%zu", (u64)da, len);
 		va = NULL;
@@ -214,13 +209,6 @@ static int rk3506_rproc_probe(struct platform_device *pdev)
 		goto free_rproc;
 	}
 
-	mcu->shmem_virt = ioremap(RK3506_MCU_SHMEM_ADDR, RK3506_MCU_SHMEM_SIZE);
-	if (!mcu->shmem_virt) {
-		dev_err(&pdev->dev, "failed to ioremap shared memory");
-		ret = -ENOMEM;
-		goto unmap_tcm;
-	}
-
 	mcu->regs_PMU = ioremap(RK3506_PMU_BASE, 4096);
 	mcu->regs_CRU = ioremap(RK3506_CRU_BASE, 4096);
 	mcu->regs_GRF = ioremap(RK3506_GRF_BASE, 4096);
@@ -276,7 +264,6 @@ unmap_periph:
 	if (mcu->regs_PMU) iounmap(mcu->regs_PMU);
 	if (mcu->regs_CRU) iounmap(mcu->regs_CRU);
 	if (mcu->regs_GRF) iounmap(mcu->regs_GRF);
-	if (mcu->shmem_virt) iounmap(mcu->shmem_virt);
 unmap_tcm:
 	if (mcu->tcm_virt) iounmap(mcu->tcm_virt);
 free_rproc:
@@ -300,7 +287,6 @@ static int rk3506_rproc_remove(struct platform_device *pdev)
 	rk3506_rproc_shutdown(pdev);
 	clk_bulk_disable_unprepare(mcu->num_clks, mcu->clks);
 	if (mcu->tcm_virt) iounmap(mcu->tcm_virt);
-	if (mcu->shmem_virt) iounmap(mcu->shmem_virt);
 	if (mcu->regs_PMU) iounmap(mcu->regs_PMU);
 	if (mcu->regs_CRU) iounmap(mcu->regs_CRU);
 	if (mcu->regs_GRF) iounmap(mcu->regs_GRF);

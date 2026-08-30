@@ -6,7 +6,7 @@
 
 #include <asm/barrier.h>
 #include <asm/div64.h>
-#include <linux/delay.h>
+#include <linux/compiler.h>
 #include <linux/hrtimer.h>
 #include <linux/io.h>
 #include <linux/ktime.h>
@@ -57,7 +57,7 @@ struct picocalc_m0 {
 	struct snd_pcm_substream *substream;
 	struct rproc *rproc;
 	struct m0_audio_shmem *shmem;
-	void *shmem_virt;  /* WB-mapped for fast ring buffer access */
+	void *shmem_virt;  /* WC: uncached to M0; no second map in rproc */
 	size_t shmem_size;
 	uint32_t buf_size;
 	spinlock_t lock;
@@ -66,11 +66,94 @@ struct picocalc_m0 {
 	uint32_t last_read_idx;
 	uint32_t copied_bytes;
 	bool running;
-	struct work_struct start_work;
-	struct work_struct stop_work;
+	bool want_play;
+	bool rproc_up;
+	struct work_struct rproc_work;
 };
 
 static struct picocalc_m0 *g_m0;
+
+static uint32_t m0_ring_space(uint32_t write_idx, uint32_t read_idx, uint32_t buf_size)
+{
+	if (write_idx >= read_idx)
+		return buf_size - (write_idx - read_idx) - 1;
+	return read_idx - write_idx - 1;
+}
+
+/* Copy at most one period of app data into the M0 ring. Frame-aligned; wraps. */
+static void m0_copy_to_ring(struct picocalc_m0 *m)
+{
+	struct snd_pcm_substream *ss = m->substream;
+	struct snd_pcm_runtime *runtime;
+	uint32_t read_idx, write_idx, period_bytes, space, to_copy, avail;
+	uint32_t buffer_bytes, buf_mask, rpos, dma_pos, left, chunk, frame_bytes;
+	uint32_t appl_off;
+	uint8_t *ring;
+	const uint8_t *dma_area;
+
+	if (!ss)
+		return;
+	runtime = ss->runtime;
+	if (!runtime || !runtime->dma_area)
+		return;
+
+	period_bytes = m->shmem->period_bytes;
+	buffer_bytes = frames_to_bytes(runtime, runtime->buffer_size);
+	frame_bytes = frames_to_bytes(runtime, 1);
+	if (!buffer_bytes || !frame_bytes)
+		return;
+
+	ring = (uint8_t *)m->shmem->buffer;
+	dma_area = (const uint8_t *)runtime->dma_area;
+	buf_mask = m->buf_size - 1;
+
+	read_idx = m->shmem->read_idx;
+	dma_rmb();
+	write_idx = m->shmem->write_idx;
+
+	space = m0_ring_space(write_idx, read_idx, m->buf_size);
+	/* appl_ptr vs our copy offset — do not use hw_avail; status hw_ptr is stale here */
+	appl_off = frames_to_bytes(runtime,
+				  READ_ONCE(runtime->control->appl_ptr) % runtime->buffer_size);
+	if (appl_off >= m->copied_bytes)
+		avail = appl_off - m->copied_bytes;
+	else
+		avail = buffer_bytes - m->copied_bytes + appl_off;
+
+	to_copy = period_bytes;
+	if (to_copy > space)
+		to_copy = space;
+	if (to_copy > avail)
+		to_copy = avail;
+	to_copy -= to_copy % frame_bytes;
+	if (!to_copy)
+		return;
+
+	rpos = write_idx;
+	dma_pos = m->copied_bytes; /* already < buffer_bytes */
+	left = to_copy;
+	while (left > 0) {
+		uint32_t ring_chunk = m->buf_size - rpos;
+		uint32_t dma_chunk = buffer_bytes - dma_pos;
+
+		chunk = left;
+		if (chunk > ring_chunk)
+			chunk = ring_chunk;
+		if (chunk > dma_chunk)
+			chunk = dma_chunk;
+		memcpy(ring + rpos, dma_area + dma_pos, chunk);
+		rpos = (rpos + chunk) & buf_mask;
+		dma_pos += chunk;
+		if (dma_pos >= buffer_bytes)
+			dma_pos -= buffer_bytes;
+		left -= chunk;
+	}
+	dma_wmb(); /* ring data visible to M0 before write_idx (WC map) */
+	m->shmem->write_idx = (write_idx + to_copy) & buf_mask;
+	m->copied_bytes += to_copy;
+	if (m->copied_bytes >= buffer_bytes)
+		m->copied_bytes -= buffer_bytes;
+}
 
 /*
  * Power management (M0-side WFE idle and optional WIC deep sleep) is currently
@@ -81,91 +164,88 @@ static struct picocalc_m0 *g_m0;
  * running, (b) ioremap the GRF region, (c) assert rxev to wake M0 from WFE/WFI
  * before setting ctrl=PLAY, (d) clear rxev after wake.
  */
-static void m0_start_work(struct work_struct *work)
+static void m0_rproc_work(struct work_struct *work)
 {
-	struct picocalc_m0 *m = container_of(work, struct picocalc_m0, start_work);
+	struct picocalc_m0 *m = container_of(work, struct picocalc_m0, rproc_work);
 	unsigned long flags;
 	int ret;
 
-	ret = rproc_boot(m->rproc);
-	if (ret) {
-		dev_err(&m->pdev->dev, "rproc_boot failed: %d\n", ret);
-		return;
+	for (;;) {
+		bool want;
+
+		spin_lock_irqsave(&m->lock, flags);
+		want = m->want_play;
+		spin_unlock_irqrestore(&m->lock, flags);
+
+		if (want) {
+			if (!m->rproc_up) {
+				m0_copy_to_ring(m);
+				ret = rproc_boot(m->rproc);
+				if (ret) {
+					dev_err(&m->pdev->dev, "rproc_boot failed: %d\n", ret);
+					spin_lock_irqsave(&m->lock, flags);
+					m->want_play = false;
+					m->running = false;
+					spin_unlock_irqrestore(&m->lock, flags);
+					if (m->substream)
+						snd_pcm_stop_xrun(m->substream);
+					return;
+				}
+				m->rproc_up = true;
+			}
+			spin_lock_irqsave(&m->lock, flags);
+			want = m->want_play;
+			spin_unlock_irqrestore(&m->lock, flags);
+			if (!want)
+				continue; /* STOP arrived during boot */
+			m0_copy_to_ring(m);
+			spin_lock_irqsave(&m->lock, flags);
+			if (m->want_play) {
+				m->running = true;
+				hrtimer_start(&m->timer, m->period_ktime, HRTIMER_MODE_REL);
+			}
+			want = m->want_play;
+			spin_unlock_irqrestore(&m->lock, flags);
+			if (want)
+				break;
+			continue;
+		}
+
+		spin_lock_irqsave(&m->lock, flags);
+		m->running = false;
+		spin_unlock_irqrestore(&m->lock, flags);
+		hrtimer_cancel(&m->timer);
+		if (m->rproc_up) {
+			rproc_shutdown(m->rproc);
+			m->rproc_up = false;
+		}
+		spin_lock_irqsave(&m->lock, flags);
+		want = m->want_play;
+		spin_unlock_irqrestore(&m->lock, flags);
+		if (want)
+			continue; /* START arrived during shutdown */
+		break;
 	}
-	spin_lock_irqsave(&m->lock, flags);
-	m->running = true;
-	hrtimer_start(&m->timer, m->period_ktime, HRTIMER_MODE_REL);
-	spin_unlock_irqrestore(&m->lock, flags);
-}
-
-static void m0_stop_work(struct work_struct *work)
-{
-	struct picocalc_m0 *m = container_of(work, struct picocalc_m0, stop_work);
-
-	msleep(2);
-	rproc_shutdown(m->rproc);
 }
 
 static enum hrtimer_restart m0_timer_cb(struct hrtimer *t)
 {
 	struct picocalc_m0 *m = container_of(t, struct picocalc_m0, timer);
 	struct snd_pcm_substream *ss = m->substream;
-	struct snd_pcm_runtime *runtime;
-	uint32_t read_idx, write_idx, period_bytes;
-	uint32_t space, to_copy, buffer_bytes;
-	uint32_t buf_mask, rpos, dma_pos, left, chunk;
-	uint8_t *ring;
-	const uint8_t *dma_area;
+	uint32_t read_idx, period_bytes, buf_mask;
 
 	if (!ss || !m->running)
 		return HRTIMER_NORESTART;
 
-	runtime = ss->runtime;
-	if (!runtime || !runtime->dma_area)
+	if (!ss->runtime || !ss->runtime->dma_area)
 		return HRTIMER_RESTART;
 
+	m0_copy_to_ring(m);
+
 	period_bytes = m->shmem->period_bytes;
-	buffer_bytes = frames_to_bytes(runtime, runtime->buffer_size);
-	ring = (uint8_t *)m->shmem->buffer;
-	dma_area = (const uint8_t *)runtime->dma_area;
 	buf_mask = m->buf_size - 1;
-
 	read_idx = m->shmem->read_idx;
-	write_idx = m->shmem->write_idx;
-
-	/* Free space in ring: up to buf_size - 1 to avoid write_idx == read_idx meaning empty */
-	if (write_idx >= read_idx)
-		space = m->buf_size - (write_idx - read_idx) - 1;
-	else
-		space = read_idx - write_idx - 1;
-
-	to_copy = period_bytes;
-	if (to_copy > space)
-		to_copy = space;
-	if (to_copy > 0 && m->copied_bytes + to_copy <= buffer_bytes) {
-		rpos = write_idx;
-		dma_pos = m->copied_bytes % buffer_bytes;
-		left = to_copy;
-		while (left > 0) {
-			uint32_t ring_chunk = m->buf_size - rpos;
-			uint32_t dma_chunk = buffer_bytes - dma_pos;
-
-			chunk = left;
-			if (chunk > ring_chunk)
-				chunk = ring_chunk;
-			if (chunk > dma_chunk)
-				chunk = dma_chunk;
-			memcpy(ring + rpos, dma_area + dma_pos, chunk);
-			rpos = (rpos + chunk) & buf_mask;
-			dma_pos = (dma_pos + chunk) % buffer_bytes;
-			left -= chunk;
-		}
-		dma_wmb(); /* ensure ring data visible to M0 before updating write_idx */
-		m->shmem->write_idx = (write_idx + to_copy) & buf_mask;
-		m->copied_bytes += to_copy;
-	}
-
-	/* Period elapsed? (handle ring wrap with mask) */
+	dma_rmb();
 	if (((read_idx - m->last_read_idx) & buf_mask) >= period_bytes) {
 		m->last_read_idx = read_idx;
 		snd_pcm_period_elapsed(ss);
@@ -235,7 +315,7 @@ static int m0_pcm_trigger(struct snd_pcm_substream *ss, int cmd)
 	spin_lock_irqsave(&m->lock, flags);
 	switch (cmd) {
 	case SNDRV_PCM_TRIGGER_START:
-		if (m->running) {
+		if (m->want_play) {
 			ret = -EALREADY;
 			break;
 		}
@@ -248,35 +328,30 @@ static int m0_pcm_trigger(struct snd_pcm_substream *ss, int cmd)
 		m->shmem->sample_rate = M0_FIXED_SAMPLE_RATE_HZ;
 		m->shmem->channels = 2;
 		m->shmem->format = M0_FMT_S16_LE;
-		dma_wmb(); /* ensure header visible to M0 before it sees ctrl/indices */
+		dma_wmb(); /* header visible to M0 before it sees ctrl/indices */
 
 		m->last_read_idx = 0;
 		m->copied_bytes = 0;
-		/* Fire once per ALSA period, not per sample (do_div avoids __aeabi_uldivmod on 32-bit ARM) */
+		/* Fire once per ALSA period (do_div avoids __aeabi_uldivmod on 32-bit ARM) */
 		{
 			u64 nsec = (u64)NSEC_PER_SEC * runtime->period_size;
 			do_div(nsec, runtime->rate);
 			m->period_ktime = ns_to_ktime(nsec);
 		}
 
-		schedule_work(&m->start_work);
+		m->want_play = true;
+		schedule_work(&m->rproc_work);
 		break;
 
 	case SNDRV_PCM_TRIGGER_STOP:
-		if (!m->running) {
-			/* Cancel any pending start_work so it cannot boot M0 later */
-			spin_unlock_irqrestore(&m->lock, flags);
-			cancel_work_sync(&m->start_work);
-			return 0;
-		}
-		m->running = false;
-		hrtimer_cancel(&m->timer);
+		m->want_play = false;
+		m->running = false; /* timer cb returns NORESTART; no cancel here */
 		m->shmem->ctrl = M0_CTRL_STOP;
-		spin_unlock_irqrestore(&m->lock, flags);
-		schedule_work(&m->stop_work);
-		return 0;
+		schedule_work(&m->rproc_work);
+		break;
 	default:
 		ret = -EINVAL;
+		break;
 	}
 	spin_unlock_irqrestore(&m->lock, flags);
 	return ret;
@@ -285,13 +360,9 @@ static int m0_pcm_trigger(struct snd_pcm_substream *ss, int cmd)
 static snd_pcm_uframes_t m0_pcm_pointer(struct snd_pcm_substream *ss)
 {
 	struct picocalc_m0 *m = snd_pcm_substream_chip(ss);
-	struct snd_pcm_runtime *runtime = ss->runtime;
-	unsigned int frame_size = frames_to_bytes(runtime, 1);
-	snd_pcm_uframes_t consumed_frames;
 
-	/* Position in ALSA buffer = bytes consumed (handed to M0 ring) in frames, modulo buffer */
-	consumed_frames = m->copied_bytes / frame_size;
-	return consumed_frames % runtime->buffer_size;
+	/* Copy-to-ring model: hw_ptr is bytes handed to the M0 ring */
+	return bytes_to_frames(ss->runtime, m->copied_bytes);
 }
 
 static const struct snd_pcm_ops m0_pcm_ops = {
@@ -321,8 +392,7 @@ static int m0_probe(struct platform_device *pdev)
 
 	m->pdev = pdev;
 	spin_lock_init(&m->lock);
-	INIT_WORK(&m->start_work, m0_start_work);
-	INIT_WORK(&m->stop_work, m0_stop_work);
+	INIT_WORK(&m->rproc_work, m0_rproc_work);
 	hrtimer_init(&m->timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
 	m->timer.function = m0_timer_cb;
 
@@ -351,8 +421,14 @@ static int m0_probe(struct platform_device *pdev)
 		ret = -EINVAL;
 		goto put_rproc;
 	}
+	if (rmem->size < M0_HEADER_SIZE + M0_FIXED_BUF_SIZE) {
+		dev_err(dev, "memory-region too small (%zu)\n", (size_t)rmem->size);
+		ret = -EINVAL;
+		goto put_rproc;
+	}
 	m->shmem_size = rmem->size;
-	m->shmem_virt = memremap(rmem->base, rmem->size, MEMREMAP_WB);
+	/* WC: no A55 cache on M0 stores; writes combine for the ring memcpy */
+	m->shmem_virt = devm_memremap(dev, rmem->base, rmem->size, MEMREMAP_WC);
 	if (!m->shmem_virt) {
 		ret = -ENOMEM;
 		goto put_rproc;
@@ -367,7 +443,7 @@ static int m0_probe(struct platform_device *pdev)
 	ret = snd_card_new(dev, 0, "picocalc-m0",
 			   THIS_MODULE, 0, &m->card);
 	if (ret < 0)
-		goto memunmap;
+		goto put_rproc;
 
 	m->card->private_data = m;
 	strscpy(m->card->driver, "picocalc-snd-m0", sizeof(m->card->driver));
@@ -398,8 +474,6 @@ static int m0_probe(struct platform_device *pdev)
 
 card_free:
 	snd_card_free(m->card);
-memunmap:
-	memunmap(m->shmem_virt);
 put_rproc:
 	rproc_put(m->rproc);
 	return ret;
@@ -408,20 +482,22 @@ put_rproc:
 static int m0_remove(struct platform_device *pdev)
 {
 	struct picocalc_m0 *m = platform_get_drvdata(pdev);
+	unsigned long flags;
 
 	if (!m)
 		return 0;
 	g_m0 = NULL;
-	cancel_work_sync(&m->start_work);
-	cancel_work_sync(&m->stop_work);
-	hrtimer_cancel(&m->timer);
-	if (m->running) {
+	spin_lock_irqsave(&m->lock, flags);
+	m->want_play = false;
+	m->running = false;
+	if (m->shmem)
 		m->shmem->ctrl = M0_CTRL_STOP;
-		msleep(2);
+	spin_unlock_irqrestore(&m->lock, flags);
+	cancel_work_sync(&m->rproc_work);
+	hrtimer_cancel(&m->timer);
+	if (m->rproc_up)
 		rproc_shutdown(m->rproc);
-	}
 	snd_card_free(m->card);
-	memunmap(m->shmem_virt);
 	rproc_put(m->rproc);
 	return 0;
 }

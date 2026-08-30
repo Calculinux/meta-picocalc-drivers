@@ -10,6 +10,9 @@
  * picocalc,snd-m0 sound device. Uses the same pins as PWM audio (RM_IO12/13
  * as GPIO for bit-banged output). Do not load together with pwm-audio overlay.
  *
+ * m0_shmem is reserved in picocalc-luckfox-lyra.dtsi at boot. Do not add
+ * reserved-memory from this overlay — that is too late and would alias RAM.
+ *
  * To apply at runtime:
  *   mkdir -p /sys/kernel/config/device-tree/overlays/m0-audio
  *   cat /lib/firmware/overlays/m0-audio.dtbo > /sys/kernel/config/device-tree/overlays/m0-audio/dtbo
@@ -58,16 +61,6 @@
                         <4 RK_PB2 RK_FUNC_GPIO &pcfg_pull_none>,
                         <4 RK_PB3 RK_FUNC_GPIO &pcfg_pull_none>;
                 };
-            };
-        };
-    };
-
-    fragment@2 {
-        target-path = "/reserved-memory";
-        __overlay__ {
-            m0_shmem: m0-shmem@3c00000 {
-                reg = <0x03c00000 0x100000>;
-                no-map;
             };
         };
     };

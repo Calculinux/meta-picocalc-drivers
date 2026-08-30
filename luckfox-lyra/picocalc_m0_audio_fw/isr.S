@@ -4,9 +4,10 @@
  * HIGH-LEVEL BEHAVIOUR:
  *   This ISR runs at ~1 MHz (TIMER0_CH5, DS_PERIOD_TICKS=100). Each tick it:
  *   1. Clears the timer interrupt and advances a phase accumulator (phase += rate).
- *   2. When phase >= DS_RATE, "consumes" one stereo sample from the host ring buffer:
- *      reads next L/R 16-bit sample, updates last_l/last_r, increments read_idx, and
- *      every BATCH samples writes read_idx to shared memory for the host (with DMB).
+ *   2. When phase >= DS_RATE, "consumes" one stereo sample from the host ring buffer
+ *      if write_idx != read_idx (else hold last_l/last_r): reads next L/R 16-bit
+ *      sample, updates last_l/last_r, increments read_idx, and every BATCH samples
+ *      writes read_idx to shared memory for the host (with DMB).
  *   3. Runs a second-order delta-sigma modulator (DSM) for left and right using
  *      last_l/last_r as input; produces 1-bit outputs out_l, out_r.
  *   4. Writes out_l/out_r to GPIO (GPIO4_B2 = left, GPIO4_B3 = right) for bit-bang PWM.
@@ -54,6 +55,7 @@
 .equ O_FULL,    84 @ DSM constant 32768 (full-scale) for integ2
 .equ O_BATCH,   88 @ Samples per batch before writing read_idx to shmem
 .equ O_GPIO_MASK, 92 @ GPIO mask to preserve; we OR in (out_l<<10)|(out_r<<11)
+.equ SHMEM_WRITE_IDX_OFF, 8  @ Offset in shmem for write_idx
 .equ SHMEM_READ_IDX_OFF, 12 @ Offset in shmem for read_idx
 
 /* PROLOGUE: save lr and preserve r4-r7 in r8-r11 so we can use r4-r7 without
@@ -79,10 +81,15 @@ TIMER0_CH5_IRQHandler:
 	blo     .L_no_consume                @ 2
 
 	/* CONSUME: phase -= DS_RATE, then read next L/R from ring buffer.
-	 * Buffer: int16_t left, int16_t right; read_idx in bytes, +=4, wrap with mask. */
+	 * Buffer: int16_t left, int16_t right; read_idx in bytes, +=4, wrap with mask.
+	 * Empty ring (write_idx == read_idx): hold last sample, do not advance. */
 	subs    r1, r1, r0                   @ 1  phase -= DS_RATE
 	str     r1, [r5, #O_PHASE]           @ 2
 	ldr     r1, [r5, #O_READ_IDX]       @ 2  Byte index into buffer
+	ldr     r2, [r5, #O_SHMEM]          @ 2  Shmem base
+	ldr     r2, [r2, #SHMEM_WRITE_IDX_OFF] @ 2  write_idx
+	cmp     r2, r1                       @ 1  empty?
+	beq     .L_dsm                       @ 2  hold last_l/last_r
 	ldr     r3, [r5, #O_BUF_PTR]        @ 2  Buffer base
 	ldr     r0, [r5, #O_MASK]           @ 2  Size mask
 	mov     r7, r0                       @ 1  Keep mask in r7 for wrap

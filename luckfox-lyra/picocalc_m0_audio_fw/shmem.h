@@ -12,7 +12,7 @@
 #define M0_FMT_U8         0
 #define M0_FMT_S16_LE     1
 
-#define M0_SHMEM_ADDR     0x03C00000U
+#define M0_SHMEM_ADDR     0x03C00000U  /* reserved 16 KB no-map; host maps WC once */
 
 typedef struct {
 	volatile uint32_t magic;

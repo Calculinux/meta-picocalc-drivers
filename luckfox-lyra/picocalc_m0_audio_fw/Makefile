@@ -26,7 +26,15 @@ $(ELF): $(OBJS)
 %.o: %.S
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-clean:
-	rm -f $(OBJS) $(ELF)
+HOSTCC ?= cc
 
-.PHONY: all clean
+check: check_ring
+	./check_ring
+
+check_ring: check_ring.c
+	$(HOSTCC) -O2 -Wall -Wextra -o $@ $<
+
+clean:
+	rm -f $(OBJS) $(ELF) check_ring
+
+.PHONY: all clean check

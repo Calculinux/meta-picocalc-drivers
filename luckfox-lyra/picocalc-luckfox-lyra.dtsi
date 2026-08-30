@@ -126,5 +126,14 @@
  * overlays. Apply one of:
  *   - m0-audio overlay: picocalc,snd-m0 (default firmware path)
  *   - pwm-audio overlay: fsl,picocalc-snd-pwm (hardware mod)
- * See devicetree-overlays/m0-audio-overlay.dts and pwm-audio-overlay.dts.
+ * See luckfox-lyra/overlays/m0-audio-overlay.dts and pwm-audio-overlay.dts.
+ *
+ * m0_shmem must be reserved at boot (not by a runtime overlay). 16 KB at
+ * 0x03C00000: 64-byte header + 8192-byte ring. Firmware address is fixed.
  */
+&reserved_memory {
+	m0_shmem: m0-shmem@3c00000 {
+		reg = <0x03c00000 0x4000>;
+		no-map;
+	};
+};

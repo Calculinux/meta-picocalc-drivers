@@ -108,8 +108,13 @@ __attribute__((always_inline)) static inline void advance_read_idx(uint32_t step
 /* S16 LE stereo only (fixed config). Used from main loop only; ISR uses asm consume. */
 __attribute__((always_inline)) static inline void consume_s16_stereo(int32_t *s32_l, int32_t *s32_r)
 {
+	m0_audio_shmem_t *shmem = (m0_audio_shmem_t *)m0_isr_globs.shmem_base;
 	uint8_t *buf = (uint8_t *)m0_isr_globs.buf_ptr;
-	uint32_t i = m0_isr_globs.read_idx & m0_isr_globs.buf_mask;
+	uint32_t i;
+
+	if (shmem->write_idx == m0_isr_globs.read_idx)
+		return; /* empty: hold last sample */
+	i = m0_isr_globs.read_idx & m0_isr_globs.buf_mask;
 	*s32_l = (int16_t)(buf[i] | (buf[(i + 1) & m0_isr_globs.buf_mask] << 8));
 	i = (m0_isr_globs.read_idx + 2) & m0_isr_globs.buf_mask;
 	*s32_r = (int16_t)(buf[i] | (buf[(i + 1) & m0_isr_globs.buf_mask] << 8));
