@@ -19,12 +19,16 @@
 #   ./scripts/extract-overlay-symbols.sh [overlay-dir...]
 #
 # Scans one or more overlay directories for *-overlay.dts files.
-# Default: devicetree-overlays overlays luckfox-lyra/overlays
+# Default: overlays luckfox-lyra/overlays  (generic + Luckfox Lyra)
 # Output: stdout, one symbol per line.  Pipe to a file as needed.
 
 set -euo pipefail
 
-OVERLAY_DIRS=("${@:-devicetree-overlays overlays luckfox-lyra/overlays}")
+if [ $# -gt 0 ]; then
+    OVERLAY_DIRS=("$@")
+else
+    OVERLAY_DIRS=(overlays luckfox-lyra/overlays)
+fi
 
 # Gather overlay sources from all directories
 OVERLAYS=()

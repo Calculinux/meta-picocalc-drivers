@@ -8,6 +8,13 @@ on:
   workflow_dispatch:
 
 jobs:
+  check-m0-ring:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Ring copy/underrun math
+      run: make -C luckfox-lyra/picocalc_m0_audio_fw check
+
   build-drivers:
     runs-on: ubuntu-latest
     
@@ -75,6 +82,8 @@ jobs:
         scripts/config --module CONFIG_PICOCALC_MFD_BKL
         scripts/config --module CONFIG_PICOCALC_MFD_KBD
         scripts/config --module CONFIG_PICOCALC_MFD_LED
+        scripts/config --module CONFIG_PICOCALC_RK3506_RPROC
+        scripts/config --module CONFIG_PICOCALC_SND_M0
         
         # Update config with dependencies
         make ARCH=arm olddefconfig
@@ -99,7 +108,8 @@ jobs:
         KERNEL_INCLUDE="$(pwd)/../linux/include"
         KERNEL_DTS_INCLUDE="$(pwd)/../linux/arch/arm/boot/dts"
         KERNEL_DTS_INCLUDE_COMMON="${KERNEL_DTS_INCLUDE}/include"
-        for f in devicetree-overlays/*-overlay.dts; do
+        for f in overlays/*-overlay.dts luckfox-lyra/overlays/*-overlay.dts; do
+          [ -f "$f" ] || continue
           echo "==> $f"
           base=$(basename "$f" .dts)
           cpp -nostdinc \

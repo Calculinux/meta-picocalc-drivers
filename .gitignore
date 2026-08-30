@@ -12,6 +12,11 @@ oe-workdir
 modules.order
 Module.symvers
 
+# M0 firmware build artifacts
+*.elf
+*.o
+luckfox-lyra/picocalc_m0_audio_fw/check_ring
+
 # Kernel build directories and files
 *.markers
 *.order
