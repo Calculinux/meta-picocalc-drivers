@@ -11,6 +11,7 @@
 #define FRAME 4U
 #define PERIOD 1024U
 #define ALSA_BUF 32768U
+#define BOUNDARY (ALSA_BUF * 2U)
 
 static uint32_t ring_space(uint32_t write_idx, uint32_t read_idx, uint32_t buf_size)
 {
@@ -19,11 +20,12 @@ static uint32_t ring_space(uint32_t write_idx, uint32_t read_idx, uint32_t buf_s
 	return read_idx - write_idx - 1;
 }
 
-static uint32_t appl_avail(uint32_t appl_off, uint32_t copy_off, uint32_t buffer_bytes)
+/* appl and copied live in the same wrap domain as ALSA boundary, not buffer offset. */
+static uint32_t appl_avail(uint32_t appl, uint32_t copied, uint32_t boundary)
 {
-	if (appl_off >= copy_off)
-		return appl_off - copy_off;
-	return buffer_bytes - copy_off + appl_off;
+	if (appl >= copied)
+		return appl - copied;
+	return boundary - copied + appl;
 }
 
 static uint32_t copy_size(uint32_t period, uint32_t space, uint32_t avail, uint32_t frame)
@@ -47,7 +49,7 @@ static int consume(uint32_t *read_idx, uint32_t write_idx, uint32_t mask)
 
 int main(void)
 {
-	uint32_t w = 0, r = 0, copied = 0, n, i;
+	uint32_t w = 0, r = 0, copied = 0, appl = 0, n, i;
 
 	assert(ring_space(0, 0, BUF) == BUF - 1);
 	assert(ring_space(0, 4, BUF) == 3);
@@ -60,20 +62,23 @@ int main(void)
 	assert(n == 8192 - 4);
 	assert(n % FRAME == 0);
 
-	/* Streaming past one ALSA buffer (old bug: copied + n <= ALSA_BUF). */
-	for (i = 0; i < 40; i++) {
-		uint32_t appl = (copied + PERIOD) % ALSA_BUF;
+	/* Empty vs full PCM buffer at START (old bug: both looked like avail=0). */
+	assert(appl_avail(0, 0, BOUNDARY) == 0);
+	assert(appl_avail(ALSA_BUF, 0, BOUNDARY) == ALSA_BUF);
+	assert(appl_avail(PERIOD, 0, BOUNDARY) == PERIOD);
 
-		assert(appl_avail(appl, copied, ALSA_BUF) >= PERIOD);
+	/* Streaming past one ALSA buffer; appl/copied wrap at boundary. */
+	for (i = 0; i < 40; i++) {
+		appl += PERIOD;
+		if (appl >= BOUNDARY)
+			appl -= BOUNDARY;
 		n = copy_size(PERIOD, ring_space(w, r, BUF),
-			      appl_avail(appl, copied, ALSA_BUF), FRAME);
+			      appl_avail(appl, copied, BOUNDARY), FRAME);
 		assert(n > 0);
 		w = (w + n) & MASK;
 		copied += n;
-		if (copied >= ALSA_BUF)
-			copied -= ALSA_BUF;
-		assert(copied < ALSA_BUF);
-		/* M0 consumes the period we just wrote */
+		if (copied >= BOUNDARY)
+			copied -= BOUNDARY;
 		{
 			uint32_t left = n;
 
@@ -100,9 +105,8 @@ int main(void)
 	w = (w + n) & MASK;
 	assert(w < BUF);
 
-	/* appl_ptr wrap vs copy offset */
-	assert(appl_avail(0, ALSA_BUF - PERIOD, ALSA_BUF) == PERIOD);
-	assert(appl_avail(0, 0, ALSA_BUF) == 0);
+	/* Boundary wrap: appl behind copied in unsigned compare. */
+	assert(appl_avail(PERIOD, BOUNDARY - PERIOD, BOUNDARY) == 2 * PERIOD);
 
 	puts("check_ring: ok");
 	return 0;
