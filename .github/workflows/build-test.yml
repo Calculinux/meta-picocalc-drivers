@@ -108,6 +108,7 @@ jobs:
         KERNEL_INCLUDE="$(pwd)/../linux/include"
         KERNEL_DTS_INCLUDE="$(pwd)/../linux/arch/arm/boot/dts"
         KERNEL_DTS_INCLUDE_COMMON="${KERNEL_DTS_INCLUDE}/include"
+        compiled=0
         for f in overlays/*-overlay.dts luckfox-lyra/overlays/*-overlay.dts; do
           [ -f "$f" ] || continue
           echo "==> $f"
@@ -119,23 +120,47 @@ jobs:
             -undef -D__DTS__ -x assembler-with-cpp \
             "$f" > "/tmp/${base}.pp.dts"
           dtc -@ -I dts -O dtb -o "/tmp/${base}.dtbo" "/tmp/${base}.pp.dts"
+          compiled=$((compiled + 1))
         done
-    
+        if [ "$compiled" -eq 0 ]; then
+          echo "ERROR: no overlay sources compiled"
+          exit 1
+        fi
+        echo "Compiled $compiled overlay(s)"
+
     - name: Verify driver modules
       working-directory: picocalc-drivers
       run: |
-        # Check that .ko files were generated
-        echo "Checking for built kernel modules..."
-        find . -name "*.ko" -type f
-        
-        # Ensure at least some modules were built
-        MODULE_COUNT=$(find . -name "*.ko" -type f | wc -l)
-        if [ $MODULE_COUNT -eq 0 ]; then
-          echo "ERROR: No kernel modules were built!"
+        # Keep in sync with Makefile SUBDIRS / Yocto picocalc-drivers_1.0.bb.
+        expected="
+          drivers/picocalc_kbd/picocalc_kbd.ko
+          drivers/picocalc_lcd_fb/ili9488_fb.ko
+          drivers/picocalc_lcd_drm/ili9488_drm.ko
+          drivers/picocalc_snd-pwm/picocalc_snd_pwm.ko
+          drivers/picocalc_snd-softpwm/picocalc_snd_softpwm.ko
+          drivers/picocalc_mfd/picocalc_mfd.ko
+          drivers/picocalc_mfd_bms/picocalc_mfd_bms.ko
+          drivers/picocalc_mfd_bkl/picocalc_mfd_bkl.ko
+          drivers/picocalc_mfd_kbd/picocalc_mfd_kbd.ko
+          drivers/picocalc_mfd_led/picocalc_mfd_led.ko
+          luckfox-lyra/drivers/picocalc_rk3506_rproc/rk3506_rproc.ko
+          luckfox-lyra/drivers/picocalc_snd-m0/picocalc_snd_m0.ko
+        "
+        missing=0
+        for ko in $expected; do
+          if [ -f "$ko" ]; then
+            echo "OK $ko"
+          else
+            echo "ERROR: missing $ko"
+            missing=1
+          fi
+        done
+        echo "Built .ko files:"
+        find . -name "*.ko" -type f | sort
+        if [ "$missing" -ne 0 ]; then
+          echo "ERROR: expected modules were not all built"
           exit 1
         fi
-        
-        echo "Successfully built $MODULE_COUNT kernel module(s)"
     
     - name: Upload build artifacts
       uses: actions/upload-artifact@v4
