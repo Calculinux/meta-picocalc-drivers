@@ -32,14 +32,14 @@ KBUILD_O := $(if $(O),O=$(O))
 all:
 	for d in $(SUBDIRS); do \
 		if [ -d $$d ]; then \
-			$(MAKE) -C $(KERNEL_SRC) M=$(CURDIR)/$$d $(KBUILD_O) modules || exit 1; \
+			$(MAKE) -C $(KERNEL_SRC) M=$(CURDIR)/$$d $(KBUILD_O) modules || exit; \
 		fi; \
 	done
 
 clean:
 	for d in $(SUBDIRS); do \
 		if [ -d $$d ]; then \
-			$(MAKE) -C $(KERNEL_SRC) M=$(CURDIR)/$$d $(KBUILD_O) clean || exit 1; \
+			$(MAKE) -C $(KERNEL_SRC) M=$(CURDIR)/$$d $(KBUILD_O) clean || exit; \
 		fi; \
 	done
 
@@ -47,7 +47,7 @@ install:
 	# Install modules into KERNEL_SRC tree (honor INSTALL_MOD_PATH if set)
 	for d in $(SUBDIRS); do \
 		if [ -d $$d ]; then \
-			$(MAKE) -C $(KERNEL_SRC) M=$(CURDIR)/$$d $(KBUILD_O) modules_install || exit 1; \
+			$(MAKE) -C $(KERNEL_SRC) M=$(CURDIR)/$$d $(KBUILD_O) modules_install || exit; \
 		fi; \
 	done
 
