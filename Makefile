@@ -25,17 +25,21 @@ obj-$(CONFIG_PICOCALC_SND_M0)   += luckfox-lyra/drivers/picocalc_snd-m0/
 # Allow overriding KERNEL_SRC from the environment/recipe (e.g. KSRC)
 KERNEL_SRC ?= /lib/modules/$(shell uname -r)/build
 
+# Forward O= so Yocto (separate kernel output dir) finds Module.symvers.
+# Stop on the first subdir failure; a trailing success used to hide rproc/m0 errors.
+KBUILD_O := $(if $(O),O=$(O))
+
 all:
 	for d in $(SUBDIRS); do \
 		if [ -d $$d ]; then \
-			$(MAKE) -C $(KERNEL_SRC) M=$(PWD)/$$d modules; \
+			$(MAKE) -C $(KERNEL_SRC) M=$(CURDIR)/$$d $(KBUILD_O) modules || exit; \
 		fi; \
 	done
 
 clean:
 	for d in $(SUBDIRS); do \
 		if [ -d $$d ]; then \
-			$(MAKE) -C $(KERNEL_SRC) M=$(PWD)/$$d clean; \
+			$(MAKE) -C $(KERNEL_SRC) M=$(CURDIR)/$$d $(KBUILD_O) clean || exit; \
 		fi; \
 	done
 
@@ -43,7 +47,7 @@ install:
 	# Install modules into KERNEL_SRC tree (honor INSTALL_MOD_PATH if set)
 	for d in $(SUBDIRS); do \
 		if [ -d $$d ]; then \
-			$(MAKE) -C $(KERNEL_SRC) M=$(PWD)/$$d modules_install; \
+			$(MAKE) -C $(KERNEL_SRC) M=$(CURDIR)/$$d $(KBUILD_O) modules_install || exit; \
 		fi; \
 	done
 

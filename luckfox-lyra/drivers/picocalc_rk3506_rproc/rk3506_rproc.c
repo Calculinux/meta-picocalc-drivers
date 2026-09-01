@@ -264,7 +264,6 @@ unmap_periph:
 	if (mcu->regs_PMU) iounmap(mcu->regs_PMU);
 	if (mcu->regs_CRU) iounmap(mcu->regs_CRU);
 	if (mcu->regs_GRF) iounmap(mcu->regs_GRF);
-unmap_tcm:
 	if (mcu->tcm_virt) iounmap(mcu->tcm_virt);
 free_rproc:
 	rproc_free(rproc);
