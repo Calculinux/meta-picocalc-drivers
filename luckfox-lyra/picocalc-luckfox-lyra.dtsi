@@ -29,8 +29,8 @@
     picocalc_snd {
         snd_pins: snd-pins {
             rockchip,pins =
-                <4 RK_PB2 0 &pcfg_pull_none>,
-                <4 RK_PB3 0 &pcfg_pull_none>;
+                <4 RK_PB2 RK_FUNC_GPIO &pcfg_pull_none>,
+                <4 RK_PB3 RK_FUNC_GPIO &pcfg_pull_none>;
         };
     };
 };
