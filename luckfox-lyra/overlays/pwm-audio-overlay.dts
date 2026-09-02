@@ -6,7 +6,7 @@
  *
  * Enables the fsl,picocalc-snd-pwm sound device using PWM channels 0 and 1
  * on RM_IO12 / RM_IO13 (GPIO0_B4 / GPIO0_B5, Lyra pins 4/5, RK3506 pins 12/13).
- * Different pins from M0 audio (GPIO4_B2/B3, Lyra pins 32/31). Pinmux groups already exist
+ * Different pins from M0 audio (GPIO4_B2/B3, Lyra pins 31/32). Pinmux groups already exist
  * in the SoC DT; this overlay only enables the PWM blocks and sound device.
  *
  * To apply at runtime:
