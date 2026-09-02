@@ -18,6 +18,17 @@
                 <0 RK_PB2 34 &pcfg_pull_none>;
         };
     };
+
+    /* Unused until m0-audio or pwm-audio overlay claims them. In the base
+     * DTB so ConfigFS apply does not have to add pinctrl groups at runtime.
+     */
+    picocalc_snd {
+        snd_pins: snd-pins {
+            rockchip,pins =
+                <4 RK_PB2 0 &pcfg_pull_none>,
+                <4 RK_PB3 0 &pcfg_pull_none>;
+        };
+    };
 };
 
 &i2c2{

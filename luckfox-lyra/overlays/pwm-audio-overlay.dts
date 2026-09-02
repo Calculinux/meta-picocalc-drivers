@@ -41,19 +41,6 @@
     };
 
     fragment@1 {
-        target = <&pinctrl>;
-        __overlay__ {
-            picocalc_snd {
-                snd_pins: snd-pins {
-                    rockchip,pins =
-                        <4 RK_PB2 RK_FUNC_GPIO &pcfg_pull_none>,
-                        <4 RK_PB3 RK_FUNC_GPIO &pcfg_pull_none>;
-                };
-            };
-        };
-    };
-
-    fragment@2 {
         target = <&pwm0_4ch_0>;
         __overlay__ {
             pinctrl-names = "active";
@@ -64,7 +51,7 @@
         };
     };
 
-    fragment@3 {
+    fragment@2 {
         target = <&pwm0_4ch_1>;
         __overlay__ {
             pinctrl-names = "active";

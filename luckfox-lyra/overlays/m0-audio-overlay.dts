@@ -10,8 +10,8 @@
  * picocalc,snd-m0 sound device. Uses the same pins as PWM audio (RM_IO12/13
  * as GPIO for bit-banged output). Do not load together with pwm-audio overlay.
  *
- * m0_shmem is reserved in picocalc-luckfox-lyra.dtsi at boot. Do not add
- * reserved-memory from this overlay — that is too late and would alias RAM.
+ * m0_shmem and snd_pins are in picocalc-luckfox-lyra.dtsi (base DTB).
+ * This overlay only adds the sound and remoteproc devices.
  *
  * To apply at runtime:
  *   mkdir -p /sys/kernel/config/device-tree/overlays/m0-audio
@@ -48,19 +48,6 @@
                 resets = <&cru 90>, <&cru 91>,
                          <&cru 10>;
                 reset-names = "h_m0", "m0_jtag", "hresetn_m0_ac";
-            };
-        };
-    };
-
-    fragment@1 {
-        target-path = "/pinctrl";
-        __overlay__ {
-            picocalc_snd {
-                snd_pins: snd-pins {
-                    rockchip,pins =
-                        <4 RK_PB2 RK_FUNC_GPIO &pcfg_pull_none>,
-                        <4 RK_PB3 RK_FUNC_GPIO &pcfg_pull_none>;
-                };
             };
         };
     };
