@@ -5,8 +5,9 @@
  * Device tree overlay for PicoCalc M0 delta-sigma audio
  *
  * Enables the RK3506 Cortex-M0 remoteproc with M0 audio firmware and the
- * picocalc,snd-m0 sound device. Bit-bangs GPIO4_B2/B3 (RK3506 pins 138/139).
- * Hardware PWM audio uses GPIO0_B4/B5 (pins 12/13) instead.
+ * picocalc,snd-m0 sound device. Bit-bangs GPIO4_B2/B3 (Lyra pins 32/31,
+ * RK3506 pins 138/139). Hardware PWM audio uses GPIO0_B4/B5 (Lyra pins 4/5,
+ * RK3506 pins 12/13) instead.
  *
  * m0_shmem and snd_pins are in picocalc-luckfox-lyra.dtsi (base DTB).
  * This overlay only adds the sound and remoteproc devices.
