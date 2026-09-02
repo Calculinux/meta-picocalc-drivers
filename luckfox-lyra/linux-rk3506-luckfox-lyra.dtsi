@@ -182,6 +182,8 @@
 /**********usb**********/
 &usb20_otg0 {
 	dr_mode = "otg";
+	/* OTG VBUS is diode-ORed to VCC5V0_SYS / VSYS; it never drops. */
+	snps,vbus-always-on;
 	/* vbus-supply = <&vcc5v0_otg0>;
 	rockchip,gpio-vbus-det; */
 	status = "okay";
@@ -198,6 +200,7 @@
 };
 
 &u2phy_otg0 {
+	rockchip,vbus-always-on;
 	status = "okay";
 };
 
