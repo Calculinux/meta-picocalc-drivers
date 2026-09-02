@@ -19,8 +19,11 @@
         };
     };
 
-    /* Unused until m0-audio or pwm-audio overlay claims them. In the base
-     * DTB so ConfigFS apply does not have to add pinctrl groups at runtime.
+    /* M0 audio: GPIO4_B2/B3 (RK3506 pins 138/139). Unused until the
+     * m0-audio overlay claims them. In the base DTB so ConfigFS apply
+     * does not add pinctrl groups at runtime.
+     * Hardware PWM is a different pair: GPIO0_B4/B5 (pins 12/13, RM_IO12/13)
+     * via SoC groups rm_io12_pwm0_ch0 / rm_io13_pwm0_ch1.
      */
     picocalc_snd {
         snd_pins: snd-pins {
