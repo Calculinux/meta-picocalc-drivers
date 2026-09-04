@@ -101,8 +101,9 @@
 };
 
 /**********memory**********/
+/* SPI DBI stock panel needs no CMA; DSI panel overlays must set size. */
 &cma {
-	size = <0x2000000>;
+	size = <0x0>;
 };
 
 /**********graphics**********/
