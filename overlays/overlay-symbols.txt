@@ -1,4 +1,6 @@
 cru
+dmac0
+dmac1
 gpio3
 i2c2
 m0_shmem
